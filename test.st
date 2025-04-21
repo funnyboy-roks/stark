@@ -1,2 +1,2 @@
-5 2 + println
+5 dup + println
 "hello world" println

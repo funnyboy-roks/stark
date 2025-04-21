@@ -6,17 +6,31 @@ use std::{
     ops::Range,
 };
 
+use phf::phf_map;
+
+const KW_MAP: phf::Map<&'static str, TokenKind<'_>> = phf_map! {
+    "dup" => TokenKind::Dup,
+    "drop" => TokenKind::Drop,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TokenKind<'a> {
     Ident(Cow<'a, str>),
 
+    // Lits
     StrLit(Cow<'a, str>),
     IntLit(i64),
     // FloatLit(i64), // TODO
+
+    // Ops
     Plus,
     Minus,
     Asterisk,
     Slash,
+
+    // Keywords
+    Dup,
+    Drop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -121,6 +135,13 @@ impl<'a> Lexer<'a> {
         }
         Err(LexError::UnexpectedEof)
     }
+
+    fn map_ident(ident: Cow<'a, str>) -> TokenKind<'a> {
+        KW_MAP
+            .get(&ident.to_lowercase())
+            .cloned() // This is cheap as it's just a unit variant
+            .unwrap_or(TokenKind::Ident(ident))
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -147,7 +168,7 @@ impl<'a> Iterator for Lexer<'a> {
             ),
             ('a'..='z' | 'A'..='Z' | '_', _) => Some(
                 self.take_ident()
-                    .map(|n| Token::new(start..self.offset, TokenKind::Ident(n))),
+                    .map(|n| Token::new(start..self.offset, Self::map_ident(n))),
             ),
             ('+', _) => {
                 self.offset += 1;

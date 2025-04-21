@@ -158,6 +158,14 @@ where
                     let a = Self::pop(&mut self.stack, &t)?;
                     self.stack.push(a.div(b)?);
                 }
+                TokenKind::Dup => {
+                    let a = Self::pop(&mut self.stack, &t)?;
+                    self.stack.push(a.clone());
+                    self.stack.push(a);
+                }
+                TokenKind::Drop => {
+                    let _ = Self::pop(&mut self.stack, &t)?;
+                }
             }
         }
         Ok(self.stack.pop())
