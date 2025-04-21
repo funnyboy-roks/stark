@@ -9,7 +9,7 @@ A stack-based compiled programming language
 - [ ] Type system
     - Somehow validate that functions are using the correct args
     - Function overloading of sorts (maybe just for native functions,
-      i.e., print)
+      i.e., print)- both `10 print` and `"hello" print` should work
 - [ ] Functions
 - [ ] Macros
 - [ ] Imports
