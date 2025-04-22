@@ -11,7 +11,7 @@ use phf::phf_map;
 const KW_MAP: phf::Map<&'static str, TokenKind<'_>> = phf_map! {
     "dup" => TokenKind::Dup,
     "drop" => TokenKind::Drop,
-    "Extern" => TokenKind::Extern,
+    "extern" => TokenKind::Extern,
     "fn" => TokenKind::Fn,
 };
 

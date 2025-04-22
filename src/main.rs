@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if cli.lex {
         for tok in lex {
+            let tok = tok?;
             println!("{:?}", tok);
         }
     } else if cli.interpret {

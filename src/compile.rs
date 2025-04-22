@@ -7,7 +7,10 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum Type {
-    Int,
+    // TODO: I8, I16, ..
+    // TODO: U8, U16, ..
+    I64,
+    // TODO: typed pointers
     Pointer,
     // FatPointer,
 }
@@ -15,12 +18,27 @@ pub enum Type {
 impl Type {
     fn add(self, lhs: Self) -> Result<Type, CompileError> {
         match (self, lhs) {
-            (Type::Int, Type::Int) => Ok(Type::Int),
-            (Type::Int, Type::Pointer) => Ok(Type::Pointer),
-            (Type::Pointer, Type::Int) => Ok(Type::Pointer),
+            (Type::I64, Type::I64) => Ok(Type::I64),
+            (Type::I64, Type::Pointer) => Ok(Type::Pointer),
+            (Type::Pointer, Type::I64) => Ok(Type::Pointer),
             (Type::Pointer, Type::Pointer) => {
                 Err(CompileError::TypeError("Cannot add pointer to pointer"))
             }
+        }
+    }
+
+    fn from_ident(ident: &str) -> Option<Type> {
+        match ident {
+            "i64" => Some(Self::I64),
+            "ptr" => Some(Self::Pointer),
+            _ => None,
+        }
+    }
+
+    pub fn size(self) -> u32 {
+        match self {
+            Type::I64 => 8,
+            Type::Pointer => 8,
         }
     }
 }
@@ -74,10 +92,19 @@ impl Error for CompileError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternFunction {
+    linker_name: String,
+    args: Vec<Type>,
+    variatic: bool,
+    results: Vec<Type>,
+}
+
 pub struct Compiler<'a> {
     cli: &'a Cli,
     type_stack: Vec<Type>,
     data: HashMap<Box<[u8]>, usize>,
+    extern_functions: HashMap<String, ExternFunction>,
 }
 
 impl<'a> Compiler<'a> {
@@ -86,6 +113,7 @@ impl<'a> Compiler<'a> {
             cli,
             type_stack: Default::default(),
             data: Default::default(),
+            extern_functions: Default::default(),
         }
     }
 
@@ -142,12 +170,12 @@ impl<'a> Compiler<'a> {
                             self.pop(&t)?;
                             writeln!(output, "    popq rdi")?;
 
-                            self.pop_type(&t, Type::Int)?;
+                            self.pop_type(&t, Type::I64)?;
                             writeln!(output, "    popq rax")?;
 
                             writeln!(output, "    syscall")?;
 
-                            self.type_stack.push(Type::Int);
+                            self.type_stack.push(Type::I64);
                             writeln!(output, "    pushq rax")?;
                         }
                         "printf" => {
@@ -199,7 +227,7 @@ impl<'a> Compiler<'a> {
                         }
                         "exit" => {
                             dbg!(&self.type_stack);
-                            self.pop_type(&t, Type::Int)?;
+                            self.pop_type(&t, Type::I64)?;
                             writeln!(output, "    popq rdi")?;
                             writeln!(output, "    mov rax, 60")?;
                             writeln!(output, "    syscall")?;
@@ -237,7 +265,7 @@ impl<'a> Compiler<'a> {
                 }
                 TokenKind::IntLit(n) => {
                     writeln!(output, "    pushq {}", n)?;
-                    self.type_stack.push(Type::Int);
+                    self.type_stack.push(Type::I64);
                 }
                 TokenKind::Plus => {
                     let x = self.pop(&t)?;
