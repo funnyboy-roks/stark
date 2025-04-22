@@ -4,11 +4,11 @@ A stack-based compiled programming language
 
 ## TODO
 
-- [ ] Compilation
+- [x] Compilation
 - [ ] Loops
 - [ ] Type system
-    - Somehow validate that functions are using the correct args
-    - Function overloading of sorts (maybe just for native functions,
+    - [ ] Somehow validate that functions are using the correct args
+    - [ ] Function overloading of sorts (maybe just for native functions,
       i.e., print)- both `10 print` and `"hello" print` should work
 - [ ] Functions
 - [ ] Macros
@@ -18,3 +18,5 @@ A stack-based compiled programming language
 - [ ] Better CLI
 - [ ] structs
 - [ ] pointers
+- [ ] c-strings (null-terminated strings)
+    - `c"hello"` -> `"hello", 0`

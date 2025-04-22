@@ -1,2 +1,1 @@
-5 dup + println // end of line comment
-"hello world" println 23 3 * println
+5 c"hello world\n%ld\n" printf(1)

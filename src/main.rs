@@ -1,21 +1,37 @@
-use std::error::Error;
+use std::{error::Error, fs::File, path::Path};
 
+use clap::Parser;
 use lexer::Lexer;
 
+pub mod cli;
+pub mod compile;
 pub mod eval;
 pub mod lexer;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = std::env::args();
-    let program = args.next().unwrap();
-    let Some(file) = args.next() else {
-        eprintln!("{} <file>.st", program);
-        return Ok(());
-    };
-    let content = std::fs::read_to_string(file).unwrap();
+    let cli = cli::Cli::parse();
+
+    let content = std::fs::read_to_string(&cli.file).unwrap();
     let lex = Lexer::new(&content);
 
-    let eval = eval::Evaluator::new(lex);
-    eval.eval()?;
+    if cli.lex {
+        for tok in lex {
+            println!("{:?}", tok);
+        }
+    } else if cli.interpret {
+        eprintln!("evaluating...");
+        let eval = eval::Evaluator::default();
+        eval.eval(lex.clone())?;
+    } else {
+        eprintln!("compiling...");
+        let comp = compile::Compiler::new(&cli);
+        let asm_path = cli
+            .asm_out
+            .as_deref()
+            .unwrap_or_else(|| Path::new(cli.file.file_name().unwrap()))
+            .with_extension("s");
+        let mut asm_file = File::create(asm_path).unwrap();
+        comp.compile(lex, &mut asm_file)?;
+    }
     Ok(())
 }

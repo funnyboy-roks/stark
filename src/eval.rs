@@ -55,9 +55,9 @@ impl Value {
     }
 }
 
-pub struct Evaluator<I> {
+#[derive(Default)]
+pub struct Evaluator {
     stack: Vec<Value>,
-    tokens: I,
 }
 
 #[derive(Debug, Clone)]
@@ -93,17 +93,7 @@ impl Error for EvalError {
     }
 }
 
-impl<'a, I> Evaluator<I>
-where
-    I: Iterator<Item = Result<Token<'a>, LexError>>,
-{
-    pub fn new(tokens: I) -> Self {
-        Self {
-            stack: Vec::new(),
-            tokens,
-        }
-    }
-
+impl Evaluator {
     fn pop(stack: &mut Vec<Value>, token: &Token<'_>) -> Result<Value, EvalError> {
         stack.pop().ok_or(EvalError::StackUnderflow {
             tok_start: token.offset,
@@ -111,8 +101,10 @@ where
         })
     }
 
-    pub fn eval(mut self) -> Result<Option<Value>, EvalError> {
-        let tokens = self.tokens;
+    pub fn eval<'a>(
+        mut self,
+        tokens: impl Iterator<Item = Result<Token<'a>, LexError>>,
+    ) -> Result<Option<Value>, EvalError> {
         for t in tokens {
             let t = t?;
 
@@ -134,6 +126,9 @@ where
                 },
                 TokenKind::StrLit(cow) => {
                     self.stack.push(Value::String(cow.into()));
+                }
+                TokenKind::CStrLit(_) => {
+                    todo!()
                 }
                 TokenKind::IntLit(n) => {
                     self.stack.push(Value::Int(n));
@@ -166,6 +161,8 @@ where
                 TokenKind::Drop => {
                     let _ = Self::pop(&mut self.stack, &t)?;
                 }
+                TokenKind::LParen | TokenKind::RParen => unreachable!(),
+                kind => eprintln!("[NYI] Token kind: {:?}", kind),
             }
         }
         Ok(self.stack.pop())

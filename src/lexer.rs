@@ -11,14 +11,21 @@ use phf::phf_map;
 const KW_MAP: phf::Map<&'static str, TokenKind<'_>> = phf_map! {
     "dup" => TokenKind::Dup,
     "drop" => TokenKind::Drop,
+    "Extern" => TokenKind::Extern,
+    "fn" => TokenKind::Fn,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TokenKind<'a> {
     Ident(Cow<'a, str>),
+    LParen,
+    RParen,
+    LCurly,
+    RCurly,
 
     // Lits
     StrLit(Cow<'a, str>),
+    CStrLit(Cow<'a, str>),
     IntLit(i64),
     // FloatLit(i64), // TODO
 
@@ -28,9 +35,17 @@ pub enum TokenKind<'a> {
     Asterisk,
     Slash,
 
+    // Symbols
+    /// `...`
+    Ellipsis,
+    /// `->`
+    Arrow,
+
     // Keywords
     Dup,
     Drop,
+    Extern,
+    Fn,
 }
 
 impl<'a> TokenKind<'a> {
@@ -133,14 +148,38 @@ impl<'a> Lexer<'a> {
         let start = self.offset;
         let mut end = self.offset;
         let content = self.content[self.offset..].chars();
-        // TODO: support escaping of strings
+        let mut escaping = false;
+        let mut owned: Option<String> = None;
         for c in content {
-            if c == '"' {
-                self.offset = end + 1;
-                return Ok(Cow::Borrowed(&self.content[start..end]));
-            } else {
-                end += c.len_utf8();
+            match c {
+                '\\' if !escaping => {
+                    if owned.is_none() {
+                        owned = Some(self.content[start..end].to_string());
+                    }
+                    escaping = true;
+                }
+                '"' if !escaping => {
+                    self.offset = end + 1;
+                    if let Some(owned) = owned {
+                        return Ok(Cow::Owned(owned));
+                    } else {
+                        return Ok(Cow::Borrowed(&self.content[start..end]));
+                    }
+                }
+                'n' if escaping => {
+                    if let Some(ref mut owned) = owned {
+                        owned.push('\n');
+                    }
+                    escaping = false;
+                }
+                c => {
+                    if let Some(ref mut owned) = owned {
+                        owned.push(c);
+                    }
+                    escaping = false;
+                }
             }
+            end += c.len_utf8();
         }
         Err(LexError::UnexpectedEof)
     }
@@ -227,6 +266,21 @@ impl<'a> Iterator for Lexer<'a> {
                             .map(|n| Token::new(start..self.offset, TokenKind::IntLit(n))),
                     )
                 }
+                ('-', Some('>')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::Arrow)));
+                }
+                ('.', Some('.')) if chars.next() == Some('.') => {
+                    self.offset += 3;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::Ellipsis)));
+                }
+                ('c', Some('"')) => {
+                    self.offset += 1;
+                    return Some(
+                        self.take_strlit()
+                            .map(|n| Token::new(start..self.offset, TokenKind::CStrLit(n))),
+                    );
+                }
                 ('a'..='z' | 'A'..='Z' | '_', _) => {
                     return Some(
                         self.take_ident()
@@ -236,6 +290,22 @@ impl<'a> Iterator for Lexer<'a> {
                 ('+', _) => {
                     self.offset += 1;
                     return Some(Ok(Token::new(start..self.offset, TokenKind::Plus)));
+                }
+                ('(', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::LParen)));
+                }
+                (')', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::RParen)));
+                }
+                ('{', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::LCurly)));
+                }
+                ('}', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::RCurly)));
                 }
                 ('-', _) => {
                     self.offset += 1;
