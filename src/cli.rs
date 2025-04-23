@@ -9,7 +9,10 @@ pub struct Cli {
     #[clap(short, long, conflicts_with = "interpret")]
     pub lex: bool,
 
-    #[clap(short = 'p', long = "out")]
+    #[clap(long)]
+    pub auto_drop: bool,
+
+    #[clap(short = 'o', long = "out")]
     pub asm_out: Option<PathBuf>,
     pub file: PathBuf,
 }

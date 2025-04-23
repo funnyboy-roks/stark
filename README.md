@@ -13,10 +13,12 @@ A stack-based compiled programming language
 - [ ] Functions
 - [ ] Macros
 - [ ] Imports
-- [ ] Linking with libc
-- [ ] extern functions
+- [x] Linking with libc
+- [x] extern functions
 - [ ] Better CLI
 - [ ] structs
 - [ ] pointers
-- [ ] c-strings (null-terminated strings)
+- [x] c-strings (null-terminated strings)
     - `c"hello"` -> `"hello", 0`
+- [ ] Auto drop (and other global directives):
+    - `@auto_drop` at top of file or something

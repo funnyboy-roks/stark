@@ -22,6 +22,7 @@ pub enum TokenKind<'a> {
     RParen,
     LCurly,
     RCurly,
+    Semicolon,
 
     // Lits
     StrLit(Cow<'a, str>),
@@ -286,6 +287,10 @@ impl<'a> Iterator for Lexer<'a> {
                         self.take_ident()
                             .map(|n| Token::new(start..self.offset, TokenKind::from_ident(n))),
                     )
+                }
+                (';', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(start..self.offset, TokenKind::Semicolon)));
                 }
                 ('+', _) => {
                     self.offset += 1;

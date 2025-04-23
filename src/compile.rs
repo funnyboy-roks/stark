@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fmt::Display, io::Write};
+use std::{collections::HashMap, error::Error, fmt::Display, io::Write, iter::Peekable};
 
 use crate::{
     cli::Cli,
@@ -12,7 +12,8 @@ pub enum Type {
     I64,
     // TODO: typed pointers
     Pointer,
-    // FatPointer,
+    // TODO: make this work
+    FatPointer,
 }
 
 impl Type {
@@ -24,6 +25,7 @@ impl Type {
             (Type::Pointer, Type::Pointer) => {
                 Err(CompileError::TypeError("Cannot add pointer to pointer"))
             }
+            _ => Err(CompileError::TypeError("TODO: Type errors")),
         }
     }
 
@@ -39,6 +41,7 @@ impl Type {
         match self {
             Type::I64 => 8,
             Type::Pointer => 8,
+            Type::FatPointer => 8 + 8,
         }
     }
 }
@@ -58,6 +61,14 @@ pub enum CompileError {
         message: String,
     },
     StackNotEmpty,
+    UnexpectedToken,
+    UnexpectedEof,
+    RepeatDefinition,
+    IncorrectExplicitArgSize {
+        expected: usize,
+        actual: usize,
+        variadic: bool,
+    },
 }
 
 impl Display for CompileError {
@@ -95,9 +106,12 @@ impl Error for CompileError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternFunction {
     linker_name: String,
+    // tok_{start,end} point to the ident
+    tok_start: usize,
+    tok_end: usize,
     args: Vec<Type>,
-    variatic: bool,
-    results: Vec<Type>,
+    variadic: bool,
+    returns: Vec<Type>,
 }
 
 pub struct Compiler<'a> {
@@ -139,6 +153,127 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    fn expect_token<'b>(
+        &mut self,
+        tokens: &mut impl Iterator<Item = Result<Token<'b>, LexError>>,
+        expected: TokenKind<'_>,
+    ) -> Result<(), CompileError> {
+        let tok = tokens.next().ok_or(CompileError::UnexpectedEof)??;
+        if tok.kind != expected {
+            return Err(CompileError::UnexpectedToken);
+        }
+        Ok(())
+    }
+
+    fn take_args<'b>(
+        &mut self,
+        tokens: &mut impl Iterator<Item = Result<Token<'b>, LexError>>,
+    ) -> Result<(Vec<Type>, bool), CompileError> {
+        let mut args = Vec::new();
+        let mut variadic = false;
+        for t in tokens {
+            let t = t?;
+            match t.kind {
+                TokenKind::Ident(cow) if !variadic => {
+                    let Some(ty) = Type::from_ident(&cow) else {
+                        dbg!(cow);
+                        return Err(CompileError::UnexpectedToken);
+                    };
+                    args.push(ty);
+                }
+                TokenKind::RParen => {
+                    break;
+                }
+                TokenKind::Ellipsis if !variadic => {
+                    variadic = true;
+                }
+                _ => {
+                    dbg!(t);
+                    return Err(CompileError::UnexpectedToken);
+                }
+            }
+        }
+        Ok((args, variadic))
+    }
+
+    // TODO: dedicated parsing step
+    /// ```
+    /// extern fn strlen(ptr) -> (i64);
+    /// ```
+    fn parse_extern_fn<'b>(
+        &mut self,
+        tokens: &mut impl Iterator<Item = Result<Token<'b>, LexError>>,
+    ) -> Result<String, CompileError> {
+        self.expect_token(tokens, TokenKind::Fn)?;
+        let ident_tok = tokens.next().ok_or(CompileError::UnexpectedEof)??;
+        let TokenKind::Ident(ident) = ident_tok.kind else {
+            return Err(CompileError::UnexpectedToken);
+        };
+        self.expect_token(tokens, TokenKind::LParen)?;
+
+        let (args, variadic) = self.take_args(tokens)?;
+        self.expect_token(tokens, TokenKind::Arrow)?;
+        self.expect_token(tokens, TokenKind::LParen)?;
+        let (returns, false) = self.take_args(tokens)? else {
+            return Err(CompileError::UnexpectedToken);
+        };
+        self.expect_token(tokens, TokenKind::Semicolon)?;
+        let new_fn = ExternFunction {
+            linker_name: ident.to_string(),
+            tok_start: ident_tok.offset,
+            tok_end: ident_tok.end,
+            args,
+            variadic,
+            returns,
+        };
+        let existing = self.extern_functions.insert(ident.to_string(), new_fn);
+
+        if existing.is_some() {
+            return Err(CompileError::RepeatDefinition);
+        }
+
+        Ok(ident.to_string())
+    }
+
+    fn get_call_len<'b>(
+        &mut self,
+        tokens: &mut Peekable<impl Iterator<Item = Result<Token<'b>, LexError>>>,
+    ) -> Result<Option<u32>, CompileError> {
+        let Some(tok) = tokens.peek() else {
+            return Ok(None);
+        };
+        if tok.as_ref().is_ok_and(|t| t.kind != TokenKind::LParen) {
+            return Ok(None);
+        }
+        tokens.next().expect("checked above with .peek")?;
+
+        let Some(tok) = tokens.peek() else {
+            return Ok(None);
+        };
+        let num = match tok {
+            Ok(tok) => {
+                let TokenKind::IntLit(num) = tok.kind else {
+                    return Ok(None);
+                };
+                tokens.next().expect("checked above with .peek")?;
+                num
+            }
+            Err(_) => {
+                return Ok(None);
+            }
+        };
+
+        let Some(tok) = tokens.peek() else {
+            return Ok(None);
+        };
+        if tok.as_ref().is_ok_and(|t| t.kind != TokenKind::RParen) {
+            return Ok(None);
+        };
+        tokens.next().expect("checked above with .peek")?;
+
+        Ok(Some(num as _))
+    }
+
     pub fn compile<'b>(
         mut self,
         tokens: impl Iterator<Item = Result<Token<'b>, LexError>>,
@@ -148,7 +283,6 @@ impl<'a> Compiler<'a> {
         writeln!(output, r#"format ELF64"#)?;
         writeln!(output, r#"section ".text" executable"#)?;
         writeln!(output)?;
-        writeln!(output, r#"extrn printf"#)?;
         writeln!(output, r#"public main"#)?;
         writeln!(output, r#"main:"#)?;
 
@@ -158,6 +292,9 @@ impl<'a> Compiler<'a> {
                 TokenKind::Ident(ref s) => {
                     //
                     match &**s {
+                        "dump_stack" => {
+                            dbg!(&self.type_stack);
+                        }
                         "syscall3" => {
                             dbg!(&self.type_stack);
 
@@ -178,62 +315,63 @@ impl<'a> Compiler<'a> {
                             self.type_stack.push(Type::I64);
                             writeln!(output, "    pushq rax")?;
                         }
-                        "printf" => {
-                            let args = 't: {
-                                let Some(tok) = tokens.peek() else {
-                                    break 't 0;
-                                };
-                                if tok.as_ref().is_ok_and(|t| t.kind != TokenKind::LParen) {
-                                    break 't 0;
-                                }
-                                tokens.next().expect("checked above with .peek")?;
-
-                                let Some(tok) = tokens.peek() else {
-                                    break 't 0;
-                                };
-                                let num = match tok {
-                                    Ok(tok) => {
-                                        let TokenKind::IntLit(num) = tok.kind else {
-                                            break 't 0;
-                                        };
-                                        tokens.next().expect("checked above with .peek")?;
-                                        num
-                                    }
-                                    Err(_) => {
-                                        break 't 0;
-                                    }
-                                };
-
-                                let Some(tok) = tokens.peek() else {
-                                    break 't 0;
-                                };
-                                if tok.as_ref().is_ok_and(|t| t.kind != TokenKind::RParen) {
-                                    break 't 0;
-                                };
-                                tokens.next().expect("checked above with .peek")?;
-
-                                num
+                        // "exit" => {
+                        //     dbg!(&self.type_stack);
+                        //     self.pop_type(&t, Type::I64)?;
+                        //     writeln!(output, "    popq rdi")?;
+                        //     writeln!(output, "    mov rax, 60")?;
+                        //     writeln!(output, "    syscall")?;
+                        // }
+                        s => {
+                            let Some(ext) = self.extern_functions.get(s) else {
+                                todo!("ident '{}'", s);
                             };
-                            writeln!(output, "    popq rdi")?;
-                            let _ = self.pop(&t)?;
-                            if args >= 1 {
-                                writeln!(output, "    popq rsi")?;
+                            // TODO
+                            let ext = ext.clone();
+
+                            let len = self
+                                .get_call_len(&mut tokens)?
+                                .unwrap_or(ext.args.len() as u32);
+                            let registers = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+
+                            if (ext.variadic && (len as usize) < ext.args.len())
+                                || (!ext.variadic && ext.args.len() != len as usize)
+                            {
+                                return Err(CompileError::IncorrectExplicitArgSize {
+                                    expected: ext.args.len(),
+                                    actual: len as usize,
+                                    variadic: ext.variadic,
+                                });
                             }
-                            for _ in 0..args {
-                                let _ = self.pop(&t)?;
+
+                            for i in 0..len as usize {
+                                if let Some(r) = registers.get(i) {
+                                    writeln!(output, "    popq {}", r)?;
+                                }
+
+                                if i < ext.args.len() {
+                                    self.pop_type(&t, ext.args[i])?;
+                                } else {
+                                    self.pop(&t)?;
+                                }
                             }
-                            writeln!(output, "    mov eax, 0")?;
-                            writeln!(output, "    call printf")?;
-                        }
-                        "exit" => {
-                            dbg!(&self.type_stack);
-                            self.pop_type(&t, Type::I64)?;
-                            writeln!(output, "    popq rdi")?;
-                            writeln!(output, "    mov rax, 60")?;
-                            writeln!(output, "    syscall")?;
-                        }
-                        _ => {
-                            todo!("ident '{}'", s);
+
+                            writeln!(output, "    mov rax, 0")?;
+                            writeln!(output, "    call {}", ext.linker_name)?;
+                            for i in 0..len as usize {
+                                // Pop _our_ arguments from the stack (this is kinda sus, ngl)
+                                // TODO: validate this is correct
+                                if i >= registers.len() {
+                                    writeln!(output, "    popq rdi")?;
+                                }
+                            }
+                            if !ext.returns.is_empty() {
+                                writeln!(output, "    pushq rax")?;
+                            }
+
+                            for t in ext.returns {
+                                self.type_stack.push(t);
+                            }
                         }
                     }
                 }
@@ -243,11 +381,12 @@ impl<'a> Compiler<'a> {
                         *n
                     } else {
                         let next = self.data.len();
-                        let s = s.into_owned().into_bytes();
+                        let mut s = s.into_owned().into_bytes();
+                        s.push(0);
                         self.data.insert(s.into_boxed_slice(), next);
                         next
                     };
-                    self.type_stack.push(Type::Pointer);
+                    self.type_stack.push(Type::FatPointer);
                     writeln!(output, "    pushq string_{}", n)?;
                 }
                 TokenKind::CStrLit(s) => {
@@ -297,12 +436,36 @@ impl<'a> Compiler<'a> {
                     writeln!(output, "    popq rax")?;
                     let _ = self.pop(&t)?;
                 }
-                TokenKind::LParen | TokenKind::RParen => unreachable!(),
-                kind => eprintln!("[NYI] Token kind: {:?}", kind),
+                TokenKind::Extern => {
+                    let name = self.parse_extern_fn(&mut tokens)?;
+                    writeln!(output, "extrn {}", name)?;
+                }
+                kind => todo!("Token kind: {:?}", kind),
             }
             writeln!(output)?;
         }
 
+        if !self.type_stack.is_empty() {
+            if self.cli.auto_drop {
+                eprintln!(
+                    "[WARN] {} {} still left on stack: {:?}",
+                    self.type_stack.len(),
+                    if self.type_stack.len() == 1 {
+                        "item"
+                    } else {
+                        "items"
+                    },
+                    &self.type_stack
+                );
+                for _ in &self.type_stack {
+                    writeln!(output, "    popq rax")?;
+                }
+            } else {
+                return Err(CompileError::StackNotEmpty);
+            }
+        }
+
+        writeln!(output, "    mov rax, 0")?;
         writeln!(output, "    ret")?;
 
         for (s, n) in self.data {
@@ -315,10 +478,6 @@ impl<'a> Compiler<'a> {
                 write!(output, "{}", c)?;
             }
             writeln!(output)?;
-        }
-
-        if !self.type_stack.is_empty() {
-            return Err(CompileError::StackNotEmpty);
         }
 
         Ok(())
