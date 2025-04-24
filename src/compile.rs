@@ -334,7 +334,7 @@ where
                     *n
                 } else {
                     let next = self.data.len();
-                    let mut s = s.to_string().into_bytes();
+                    let s = s.to_string().into_bytes();
                     self.data.insert(s.into_boxed_slice(), next);
                     next
                 };
