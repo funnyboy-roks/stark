@@ -165,6 +165,7 @@ where
                 }
                 Ast::Fn(_) => {}
                 Ast::Then(_) => {}
+                Ast::While(_) => {}
             }
         }
 
@@ -284,6 +285,8 @@ where
             }
             AtomKind::Asterisk => todo!("asterisk"),
             AtomKind::Slash => todo!("slash"),
+            AtomKind::Equal => todo!("equal"),
+            AtomKind::Not => todo!("not"),
             AtomKind::Dup => {
                 writeln!(self.out, "    popq rax")?;
                 writeln!(self.out, "    pushq rax")?;
@@ -313,6 +316,7 @@ where
                 Ast::ExternFn(_) => {}
                 Ast::Fn(_) => todo!(),
                 Ast::Then(_) => todo!(),
+                Ast::While(_) => todo!(),
             }
         }
 

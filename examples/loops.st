@@ -6,6 +6,6 @@ extern fn printf(ptr ...) -> (i64);
     1 -
 }
 
-0 5 for {
-    // loops 0..5
-}
+// 0 5 for {
+//     // loops 0..5
+// }

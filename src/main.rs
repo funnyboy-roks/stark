@@ -30,7 +30,7 @@ fn main() -> Result<(), miette::Error> {
         eprintln!("parsing...");
         let parser = parse::Parser::new(lex);
         let ast = parser.parse().map_err(|e| {
-            e.with_source_code(NamedSource::new(
+            miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
                 content.to_string(),
             ))
@@ -46,7 +46,7 @@ fn main() -> Result<(), miette::Error> {
         let mut asm_file = File::create(asm_path).unwrap();
         let parser = parse::Parser::new(lex);
         let ast = parser.parse().map_err(|e| {
-            e.with_source_code(NamedSource::new(
+            miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
                 content.to_string(),
             ))

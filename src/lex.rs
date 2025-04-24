@@ -9,6 +9,9 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "drop" => TokenValue::Drop,
     "extern" => TokenValue::Extern,
     "fn" => TokenValue::Fn,
+    "then" => TokenValue::Then,
+    "else" => TokenValue::Else,
+    "while" => TokenValue::While,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,6 +34,8 @@ pub enum TokenKind {
     Minus,
     Asterisk,
     Slash,
+    Equal,
+    Not,
 
     // Symbols
     /// `...`
@@ -46,6 +51,7 @@ pub enum TokenKind {
 
     Then,
     Else,
+    While,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -68,6 +74,8 @@ pub enum TokenValue {
     Minus,
     Asterisk,
     Slash,
+    Equal,
+    Not,
 
     // Symbols
     /// `...`
@@ -83,6 +91,7 @@ pub enum TokenValue {
 
     Then,
     Else,
+    While,
 }
 
 impl TokenValue {
@@ -108,6 +117,8 @@ impl TokenValue {
             TokenValue::Minus => TokenKind::Minus,
             TokenValue::Asterisk => TokenKind::Asterisk,
             TokenValue::Slash => TokenKind::Slash,
+            TokenValue::Equal => TokenKind::Equal,
+            TokenValue::Not => TokenKind::Not,
             TokenValue::Ellipsis => TokenKind::Ellipsis,
             TokenValue::Arrow => TokenKind::Arrow,
             TokenValue::Dup => TokenKind::Dup,
@@ -116,6 +127,7 @@ impl TokenValue {
             TokenValue::Fn => TokenKind::Fn,
             TokenValue::Then => TokenKind::Then,
             TokenValue::Else => TokenKind::Else,
+            TokenValue::While => TokenKind::While,
         }
     }
 }
@@ -309,7 +321,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl Iterator for Lexer<'_> {
     type Item = Result<Token, LexError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -372,7 +384,7 @@ impl<'a> Iterator for Lexer<'a> {
                 }
                 ('a'..='z' | 'A'..='Z' | '_', _) => {
                     return Some(self.take_ident().map(|n| {
-                        Token::new(start..self.offset, self.file, TokenValue::from_ident(&*n))
+                        Token::new(start..self.offset, self.file, TokenValue::from_ident(&n))
                     }))
                 }
                 (';', _) => {
@@ -445,6 +457,22 @@ impl<'a> Iterator for Lexer<'a> {
                         start..self.offset,
                         self.file,
                         TokenValue::Slash,
+                    )));
+                }
+                ('=', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Equal,
+                    )));
+                }
+                ('!', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Equal,
                     )));
                 }
                 ('"', _) => {

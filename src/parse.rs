@@ -1,9 +1,9 @@
 use std::iter::Peekable;
 
-use miette::{Diagnostic, LabeledSpan, SourceSpan};
+use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-use crate::lex::{Lexer, Token, TokenKind, TokenValue};
+use crate::lex::{LexError, Lexer, Token, TokenKind, TokenValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
@@ -24,6 +24,8 @@ pub enum AtomKind {
     Minus,
     Asterisk,
     Slash,
+    Equal,
+    Not,
 
     // Keywords
     Dup,
@@ -48,6 +50,8 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Minus => Ok(Self::Minus),
             TokenValue::Asterisk => Ok(Self::Asterisk),
             TokenValue::Slash => Ok(Self::Slash),
+            TokenValue::Equal => Ok(Self::Equal),
+            TokenValue::Not => Ok(Self::Not),
             TokenValue::Ellipsis => Err(()),
             TokenValue::Arrow => Err(()),
             TokenValue::Dup => Ok(Self::Dup),
@@ -56,6 +60,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Fn => Err(()),
             TokenValue::Then => Err(()),
             TokenValue::Else => Err(()),
+            TokenValue::While => Err(()),
         }
     }
 }
@@ -67,14 +72,11 @@ pub struct Atom {
 }
 
 impl TryFrom<Token> for Atom {
-    type Error = miette::Report;
+    type Error = ParseError;
 
     fn try_from(token: Token) -> Result<Self, Self::Error> {
-        let kind = token
-            .value
-            .clone()
-            .try_into()
-            .map_err(|()| miette::miette!("Token is not valid atom: {:?}", token.kind()))?;
+        // TODO: remove this unwrap
+        let kind = token.value.clone().try_into().unwrap();
         Ok(Self { token, kind })
     }
 }
@@ -116,8 +118,18 @@ pub struct Then {
     then_token: Token,
     body: Vec<Ast>,
     else_thens: Vec<ElseThen>,
-    else_token: Token,
+    else_token: Option<Token>,
     else_body: Option<Vec<Ast>>,
+}
+
+/// ```stark
+/// ... while x y z { }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct While {
+    while_token: Token,
+    condition: Vec<Ast>,
+    body: Vec<Ast>,
 }
 
 // TODO: This isn't really an ast
@@ -128,6 +140,7 @@ pub enum Ast {
     ExternFn(ExternFn),
     Fn(Fn),
     Then(Then),
+    While(While),
 }
 
 pub struct Parser<'a> {
@@ -136,6 +149,8 @@ pub struct Parser<'a> {
 
 #[derive(Debug, Clone, Error, Diagnostic)]
 pub enum ParseError {
+    #[error(transparent)]
+    LexError(#[from] LexError),
     #[error("Unexpected token '{found:?}'")]
     UnexpectedToken {
         #[label = "here"]
@@ -157,7 +172,16 @@ pub enum ParseError {
         expected: &'static [TokenKind],
     },
     #[error("Expected {expected}, found EOF")]
-    UnexpectedEof { expected: String },
+    UnexpectedEof {
+        expected: String,
+        #[label = "while matching this"]
+        matching: Option<SourceSpan>,
+    },
+    #[error("Nested function definitions are not supported")]
+    NestedFunction {
+        #[label = "Function definition"]
+        span: SourceSpan,
+    },
 }
 
 impl ParseError {
@@ -186,6 +210,7 @@ macro_rules! expect_token {
         let Some(token) = $self.tokens.next() else {
             return Err(ParseError::UnexpectedEof {
                 expected: "token".into(),
+                matching: None,
             }
             .into());
         };
@@ -195,10 +220,7 @@ macro_rules! expect_token {
         match token.value {
             TokenValue::$ident => (token, ()),
             _ => {
-                return Err(miette::miette! {
-                    labels = vec![LabeledSpan::new_with_span(Some("here".into()), token.span)],
-                    "Unexpected token.  Expected {:?}, found {:?}", TokenKind::$ident, token.kind()
-                });
+                return Err(ParseError::unexpected_token(token, &[TokenKind::$ident]));
             }
         }
     }};
@@ -206,8 +228,8 @@ macro_rules! expect_token {
         let Some(token) = $self.tokens.next() else {
             return Err(ParseError::UnexpectedEof {
                 expected: "token".into(),
-            }
-            .into());
+                matching: None,
+            });
         };
 
         let token = token?;
@@ -218,13 +240,32 @@ macro_rules! expect_token {
                 (token, x)
             }
             _ => {
-                return Err(miette::miette! {
-                    labels = vec![LabeledSpan::new_with_span(Some("here".into()), token.span)],
-                    "Unexpected token.  Expected {:?}, found {:?}", TokenKind::$ident, token.kind()
-                });
+                return Err(ParseError::unexpected_token(token, &[TokenKind::$ident]));
             }
         }
     }};
+}
+
+macro_rules! try_expect_token {
+    ($self: ident, $ident: ident) => {
+        'a: {
+            let Some(token) = $self.tokens.peek() else {
+                break 'a None;
+            };
+
+            let Ok(token) = token.as_ref() else {
+                break 'a None;
+            };
+
+            match token.value {
+                TokenValue::$ident => {
+                    let token = $self.tokens.next().expect("checked above")?;
+                    Some(token)
+                }
+                _ => None,
+            }
+        }
+    };
 }
 
 impl<'a> Parser<'a> {
@@ -234,7 +275,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_args(&mut self, allow_variadic: bool) -> Result<(Vec<String>, bool), miette::Report> {
+    fn take_args(&mut self, allow_variadic: bool) -> Result<(Vec<String>, bool), ParseError> {
         let mut args = Vec::new();
         let mut variadic = false;
         for t in &mut self.tokens {
@@ -251,13 +292,11 @@ impl<'a> Parser<'a> {
                         return Err(ParseError::unexpected_token(
                             t,
                             &[TokenKind::Ident, TokenKind::RParen],
-                        )
-                        .into());
+                        ));
                     }
                     variadic = true;
                 }
                 _ => {
-                    dbg!(&t);
                     return Err(ParseError::unexpected_token(
                         t,
                         if variadic {
@@ -267,15 +306,14 @@ impl<'a> Parser<'a> {
                         } else {
                             &[TokenKind::Ident, TokenKind::RParen]
                         },
-                    )
-                    .into());
+                    ));
                 }
             }
         }
         Ok((args, variadic))
     }
 
-    fn take_extern_fn(&mut self) -> Result<ExternFn, miette::Report> {
+    fn take_extern_fn(&mut self) -> Result<ExternFn, ParseError> {
         // expect_token!(self, Extern);
         expect_token!(self, Fn);
         let (ident_token, ident) = expect_token!(self, Ident(_));
@@ -296,7 +334,136 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub fn parse(mut self) -> Result<Vec<Ast>, miette::Error> {
+    // this is very similar to parse, maybe we want to combine them?
+    fn take_body(
+        &mut self,
+        end_token: TokenKind,
+        open_token: Option<&Token>,
+    ) -> Result<(Vec<Ast>, Token), ParseError> {
+        let mut out = Vec::new();
+
+        while let Some(token) = self.tokens.next() {
+            let token = token?;
+            if token.kind() == end_token {
+                return Ok((out, token));
+            }
+            match token.value {
+                TokenValue::Ident(ref s) => 'x: {
+                    let s = s.to_string();
+                    if let Some(Ok(x)) = self.tokens.peek() {
+                        if x.kind() != TokenKind::LParen {
+                            out.push(Ast::Ident(Ident {
+                                ident: s,
+                                len: None,
+                                span: token.span,
+                            }));
+                            break 'x;
+                        }
+                    }
+                    self.tokens.next().unwrap()?;
+
+                    let (_, n) = expect_token!(self, IntLit(_));
+                    let (rparen, _) = expect_token!(self, RParen);
+
+                    out.push(Ast::Ident(Ident {
+                        ident: s,
+                        len: Some(n as u32),
+                        span: (token.span.offset()..rparen.span.offset() + rparen.span.len())
+                            .into(),
+                    }));
+                }
+                TokenValue::LParen => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::RParen => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::LCurly => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::RCurly => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::Semicolon => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::IntLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Extern => Err(ParseError::NestedFunction { span: token.span })?,
+                TokenValue::Fn => Err(ParseError::NestedFunction { span: token.span })?,
+                TokenValue::Then => {
+                    let t = self.take_then(token)?;
+                    out.push(Ast::Then(t));
+                }
+                TokenValue::Else => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::While => Err(ParseError::unexpected_token(token, &[]))?,
+            }
+        }
+
+        Err(ParseError::UnexpectedEof {
+            expected: format!("{:?}", end_token),
+            matching: open_token.map(|t| t.span),
+        })
+    }
+
+    fn take_then(&mut self, then_token: Token) -> Result<Then, ParseError> {
+        // expect_token!(self, Then);
+        expect_token!(self, LCurly);
+        let (body, _) = self.take_body(TokenKind::RCurly, Some(&then_token))?;
+
+        let mut else_thens = Vec::new();
+
+        loop {
+            let Some(else_token) = try_expect_token!(self, Else) else {
+                return Ok(Then {
+                    then_token,
+                    body,
+                    else_thens,
+                    else_token: None,
+                    else_body: None,
+                });
+            };
+
+            match try_expect_token!(self, LCurly) {
+                Some(l) => {
+                    let (else_body, _) = self.take_body(TokenKind::RCurly, Some(&l))?;
+                    return Ok(Then {
+                        then_token,
+                        body,
+                        else_thens: Vec::new(),
+                        else_token: Some(else_token),
+                        else_body: Some(else_body),
+                    });
+                }
+                None => {
+                    let (condition, then_token) = self.take_body(TokenKind::Then, None)?;
+                    let (l, ()) = expect_token!(self, LCurly);
+                    let (body, _) = self.take_body(TokenKind::RCurly, Some(&l))?;
+                    else_thens.push(ElseThen {
+                        else_token,
+                        then_token,
+                        condition,
+                        body,
+                    });
+                }
+            }
+        }
+    }
+
+    fn take_while(&mut self, while_token: Token) -> Result<While, ParseError> {
+        // expect_token!(self, Then);
+        let (body, l_curly) = self.take_body(TokenKind::LCurly, Some(&while_token))?;
+        let (condition, _) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
+
+        Ok(While {
+            while_token,
+            condition,
+            body,
+        })
+    }
+
+    pub fn parse(mut self) -> Result<Vec<Ast>, ParseError> {
         let mut out = Vec::new();
 
         while let Some(token) = self.tokens.next() {
@@ -338,6 +505,8 @@ impl<'a> Parser<'a> {
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
@@ -347,8 +516,14 @@ impl<'a> Parser<'a> {
                     out.push(Ast::ExternFn(f));
                 }
                 TokenValue::Fn => {}
-                TokenValue::Then => {}
+                TokenValue::Then => {
+                    let t = self.take_then(token)?;
+                    out.push(Ast::Then(t));
+                }
                 TokenValue::Else => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::While => {
+                    out.push(Ast::While(self.take_while(token)?));
+                }
             }
         }
 
