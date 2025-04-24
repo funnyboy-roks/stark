@@ -26,9 +26,12 @@ pub enum AtomKind {
     Slash,
     Equal,
     Not,
+    Lt,
 
     // Keywords
     Dup,
+    Dup2,
+    Swap,
     Drop,
 }
 
@@ -52,9 +55,12 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Slash => Ok(Self::Slash),
             TokenValue::Equal => Ok(Self::Equal),
             TokenValue::Not => Ok(Self::Not),
+            TokenValue::Lt => Ok(Self::Lt),
             TokenValue::Ellipsis => Err(()),
             TokenValue::Arrow => Err(()),
             TokenValue::Dup => Ok(Self::Dup),
+            TokenValue::Dup2 => Ok(Self::Dup2),
+            TokenValue::Swap => Ok(Self::Swap),
             TokenValue::Drop => Ok(Self::Drop),
             TokenValue::Extern => Err(()),
             TokenValue::Fn => Err(()),
@@ -385,9 +391,12 @@ impl<'a> Parser<'a> {
                 TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Dup2 => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Swap => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Extern => Err(ParseError::NestedFunction { span: token.span })?,
                 TokenValue::Fn => Err(ParseError::NestedFunction { span: token.span })?,
@@ -510,10 +519,13 @@ impl<'a> Parser<'a> {
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Dup2 => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Swap => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Extern => {
                     let f = self.take_extern_fn()?;

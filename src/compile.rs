@@ -393,6 +393,17 @@ where
                 writeln!(self.out, "    movzx rax, al")?;
                 writeln!(self.out, "    push rax")?;
             }
+            AtomKind::Lt => {
+                let x = self.pop(token.span)?;
+                let y = self.pop(token.span)?;
+                self.type_stack.push(x.equals(y, token.span)?);
+                writeln!(self.out, "    popq rax")?;
+                writeln!(self.out, "    popq rbx")?;
+                writeln!(self.out, "    cmp rbx, rax")?;
+                writeln!(self.out, "    setl al")?;
+                writeln!(self.out, "    movzx rax, al")?;
+                writeln!(self.out, "    push rax")?;
+            }
             AtomKind::Dup => {
                 writeln!(self.out, "    popq rax")?;
                 writeln!(self.out, "    pushq rax")?;
@@ -400,6 +411,30 @@ where
                 let x = self.pop(token.span)?;
                 self.type_stack.push(x);
                 self.type_stack.push(x);
+            }
+            AtomKind::Dup2 => {
+                writeln!(self.out, "    popq rax")?;
+                writeln!(self.out, "    popq rbx")?;
+                writeln!(self.out, "    pushq rbx")?;
+                writeln!(self.out, "    pushq rax")?;
+                writeln!(self.out, "    pushq rbx")?;
+                writeln!(self.out, "    pushq rax")?;
+                let x = self.pop(token.span)?;
+                let y = self.pop(token.span)?;
+                self.type_stack.push(y);
+                self.type_stack.push(x);
+                self.type_stack.push(y);
+                self.type_stack.push(x);
+            }
+            AtomKind::Swap => {
+                writeln!(self.out, "    popq rax")?;
+                writeln!(self.out, "    popq rbx")?;
+                writeln!(self.out, "    pushq rax")?;
+                writeln!(self.out, "    pushq rbx")?;
+                let x = self.pop(token.span)?;
+                let y = self.pop(token.span)?;
+                self.type_stack.push(x);
+                self.type_stack.push(y);
             }
             AtomKind::Drop => {
                 writeln!(self.out, "    popq rax")?;

@@ -6,6 +6,8 @@ use thiserror::Error;
 
 const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "dup" => TokenValue::Dup,
+    "dup2" => TokenValue::Dup2,
+    "swap" => TokenValue::Swap,
     "drop" => TokenValue::Drop,
     "extern" => TokenValue::Extern,
     "fn" => TokenValue::Fn,
@@ -36,6 +38,7 @@ pub enum TokenKind {
     Slash,
     Equal,
     Not,
+    Lt,
 
     // Symbols
     /// `...`
@@ -45,6 +48,8 @@ pub enum TokenKind {
 
     // Keywords
     Dup,
+    Dup2,
+    Swap,
     Drop,
     Extern,
     Fn,
@@ -76,6 +81,7 @@ pub enum TokenValue {
     Slash,
     Equal,
     Not,
+    Lt,
 
     // Symbols
     /// `...`
@@ -85,6 +91,8 @@ pub enum TokenValue {
 
     // Keywords
     Dup,
+    Dup2,
+    Swap,
     Drop,
     Extern,
     Fn,
@@ -119,9 +127,12 @@ impl TokenValue {
             TokenValue::Slash => TokenKind::Slash,
             TokenValue::Equal => TokenKind::Equal,
             TokenValue::Not => TokenKind::Not,
+            TokenValue::Lt => TokenKind::Lt,
             TokenValue::Ellipsis => TokenKind::Ellipsis,
             TokenValue::Arrow => TokenKind::Arrow,
             TokenValue::Dup => TokenKind::Dup,
+            TokenValue::Dup2 => TokenKind::Dup2,
+            TokenValue::Swap => TokenKind::Swap,
             TokenValue::Drop => TokenKind::Drop,
             TokenValue::Extern => TokenKind::Extern,
             TokenValue::Fn => TokenKind::Fn,
@@ -477,6 +488,14 @@ impl Iterator for Lexer<'_> {
                         start..self.offset,
                         self.file,
                         TokenValue::Not,
+                    )));
+                }
+                ('<', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Lt,
                     )));
                 }
                 ('"', _) => {

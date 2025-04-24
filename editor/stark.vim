@@ -19,12 +19,14 @@ syntax region String start=/c\?"/ end=/"/ contains=SpecialChar
 
 syntax match Function /\.\.\./
 
-syntax keyword Keyword dup drop extern fn
+syntax keyword Keyword extern fn
+syntax keyword Keyword dup dup2 drop extern fn swap
 
 syntax keyword Boolean true false
 syntax keyword Debug dump_stack
 
 syntax keyword Conditional then else while
+syntax keyword Repeat while
 syntax keyword Label case default
 
 syntax keyword Type i64 i32 i16 i8
