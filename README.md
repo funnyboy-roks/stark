@@ -2,28 +2,50 @@
 
 A stack-based compiled programming language
 
+## Examples
+
+```zig
+extern fn printf(ptr ...) -> (i64);
+
+"hello world" printf
+```
+
+```zig
+// 5 4 3 2 1
+5 while dup 0 = ! {
+    dup c"%d\n" printf(2) drop
+    1 -
+} drop
+```
+
 ## TODO
 
 - [x] Compilation
-- [ ] Loops
+- [x] Loops
+    - [ ] Labels: `while'x`
+    - [ ] break: `break` or `break'x` -- still need to check that the stack has not changed
 - [ ] Conditionals (see [conditionals.st](./examples/conditional.st))
-    - [ ] `if` or `then`
+    - [ ] `then`
     - [ ] `else`
     - [ ] `switch`? 
 - [ ] Non-decimal integer literals
 - [ ] Full suite of numbers: i8, i16, i32, i64, u8, u16, u32, u64
-- [ ] Miette + thiserror for better errors
+- [x] Miette + thiserror for better errors
 - [ ] Type system
     - [ ] Somehow validate that functions are using the correct args
     - [ ] Function overloading of sorts (maybe just for native functions,
       i.e., print)- both `10 print` and `"hello" print` should work
 - [ ] Functions
+    - [x] Extern functions
+        - `extern fn strlen(ptr) -> (i64);`
+    - [ ] User-defined functions
+        - `fn double(i64) -> (i64) { dup + }`
+        - type check function: stack = args, compile body, assert(stack = results)
 - [ ] Macros
 - [ ] Modules
     - [ ] Imports
     - [ ] Namespaces
 - [x] Linking with libc
-- [x] extern functions
 - [ ] Better CLI
 - [ ] structs
 - [ ] pointers
