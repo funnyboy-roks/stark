@@ -469,17 +469,24 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.tokens.next() {
             let token = token?;
             match token.value {
-                TokenValue::Ident(ref s) => 'x: {
-                    let s = s.to_string();
+                TokenValue::Ident(ref ident) => 'x: {
+                    let ident = ident.to_string();
                     if let Some(Ok(x)) = self.tokens.peek() {
                         if x.kind() != TokenKind::LParen {
                             out.push(Ast::Ident(Ident {
-                                ident: s,
+                                ident,
                                 len: None,
                                 span: token.span,
                             }));
                             break 'x;
                         }
+                    } else {
+                        out.push(Ast::Ident(Ident {
+                            ident,
+                            len: None,
+                            span: token.span,
+                        }));
+                        break 'x;
                     }
                     self.tokens.next().unwrap()?;
 
@@ -487,7 +494,7 @@ impl<'a> Parser<'a> {
                     let (rparen, _) = expect_token!(self, RParen);
 
                     out.push(Ast::Ident(Ident {
-                        ident: s,
+                        ident,
                         len: Some(n as u32),
                         span: (token.span.offset()..rparen.span.offset() + rparen.span.len())
                             .into(),
