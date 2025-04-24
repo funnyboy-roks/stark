@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{ffi::CString, iter::Peekable};
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -16,7 +16,7 @@ pub struct Ident {
 pub enum AtomKind {
     IntLit(i64),
     StrLit(String),
-    CStrLit(String),
+    CStrLit(CString),
     // FloatLit(i64), // TODO
 
     // Ops
@@ -115,11 +115,11 @@ pub struct ElseThen {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Then {
-    then_token: Token,
-    body: Vec<Ast>,
-    else_thens: Vec<ElseThen>,
-    else_token: Option<Token>,
-    else_body: Option<Vec<Ast>>,
+    pub then_token: Token,
+    pub body: Vec<Ast>,
+    pub else_thens: Vec<ElseThen>,
+    pub else_token: Option<Token>,
+    pub else_body: Option<Vec<Ast>>,
 }
 
 /// ```stark
@@ -127,9 +127,9 @@ pub struct Then {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct While {
-    while_token: Token,
-    condition: Vec<Ast>,
-    body: Vec<Ast>,
+    pub while_token: Token,
+    pub condition: Vec<Ast>,
+    pub body: Vec<Ast>,
 }
 
 // TODO: This isn't really an ast
@@ -453,8 +453,8 @@ impl<'a> Parser<'a> {
 
     fn take_while(&mut self, while_token: Token) -> Result<While, ParseError> {
         // expect_token!(self, Then);
-        let (body, l_curly) = self.take_body(TokenKind::LCurly, Some(&while_token))?;
-        let (condition, _) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
+        let (condition, l_curly) = self.take_body(TokenKind::LCurly, Some(&while_token))?;
+        let (body, _) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
 
         Ok(While {
             while_token,

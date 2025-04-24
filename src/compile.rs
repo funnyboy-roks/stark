@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write};
+use std::{collections::HashMap, fmt::Display, io::Write};
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     cli::Cli,
     lex::LexError,
-    parse::{Ast, Atom, AtomKind, ExternFn, Ident},
+    parse::{Ast, Atom, AtomKind, ExternFn, Ident, While},
 };
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -18,18 +18,88 @@ pub enum Type {
     Pointer,
     // TODO: make this work
     FatPointer,
+    Bool,
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::I64 => write!(f, "i64"),
+            Type::Pointer => write!(f, "ptr"),
+            Type::FatPointer => write!(f, "fatptr"),
+            Type::Bool => write!(f, "bool"),
+        }
+    }
 }
 
 impl Type {
-    fn add(self, lhs: Self) -> Result<Type, CompileError> {
+    fn add(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
         match (self, lhs) {
             (Type::I64, Type::I64) => Ok(Type::I64),
             (Type::I64, Type::Pointer) => Ok(Type::Pointer),
             (Type::Pointer, Type::I64) => Ok(Type::Pointer),
-            (Type::Pointer, Type::Pointer) => {
-                Err(CompileError::TypeError("Cannot add pointer to pointer"))
+            (Type::Pointer, Type::Pointer) => Err(CompileError::TypeError2 {
+                message: "Cannot add pointer to pointer".into(),
+                span,
+            }),
+            _ => Err(CompileError::TypeError2 {
+                message: "TODO: Type errors".into(),
+                span,
+            }),
+        }
+    }
+
+    fn sub(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
+        match (self, lhs) {
+            (Type::I64, Type::I64) => Ok(Type::I64),
+            (Type::Pointer, Type::I64) => Ok(Type::Pointer),
+            _ => Err(CompileError::TypeError2 {
+                message: "TODO: Type errors".into(),
+                span,
+            }),
+        }
+    }
+
+    fn equals(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
+        match (self, lhs) {
+            (Type::I64, Type::I64) => Ok(Type::Bool),
+            (Type::Pointer, Type::Pointer) => Ok(Type::Bool),
+            _ => Err(CompileError::TypeError2 {
+                message: "TODO: Type errors".into(),
+                span,
+            }),
+        }
+    }
+
+    fn not(self, span: SourceSpan) -> Result<Type, CompileError> {
+        match self {
+            Type::Bool => Ok(Type::Bool),
+            _ => Err(CompileError::TypeError2 {
+                message: format!("Cannot apply '!' to type {}", self),
+                span,
+            }),
+        }
+    }
+
+    fn cast_into(
+        self,
+        target: Self,
+        span: SourceSpan,
+        out: &mut impl Write,
+    ) -> Result<Type, CompileError> {
+        match (self, target) {
+            (Type::I64, Type::Bool) => {
+                writeln!(out, "    popq rax")?;
+                writeln!(out, "    cmp rax, 0")?;
+                writeln!(out, "    setne al")?;
+                writeln!(out, "    movzx rax, al")?;
+                writeln!(out, "    pushq rax")?;
+                Ok(target)
             }
-            _ => Err(CompileError::TypeError("TODO: Type errors")),
+            _ => Err(CompileError::TypeError2 {
+                message: "TODO: Type errors".into(),
+                span,
+            }),
         }
     }
 
@@ -37,6 +107,8 @@ impl Type {
         match ident {
             "i64" => Some(Self::I64),
             "ptr" => Some(Self::Pointer),
+            "fatptr" => Some(Self::FatPointer), // TODO: "fatptr" is bad
+            "bool" => Some(Self::Bool),
             _ => None,
         }
     }
@@ -46,6 +118,7 @@ impl Type {
             Type::I64 => 8,
             Type::Pointer => 8,
             Type::FatPointer => 8 + 8,
+            Type::Bool => 1,
         }
     }
 }
@@ -61,16 +134,14 @@ pub enum CompileError {
         #[label = "because of this"]
         span: SourceSpan,
     },
-    #[error("Type Error: {0}")]
-    TypeError(&'static str),
     #[error("Type Error")]
     TypeError2 {
         #[label = "{message}"]
         span: SourceSpan,
         message: String,
     },
-    #[error("Stack not empty at end of program execution")]
-    StackNotEmpty,
+    #[error("Stack not empty at end of program execution.  Contents: {stack:?}")]
+    StackNotEmpty { stack: Vec<Type> },
     #[error("'{ident}' defined multiple times")]
     RepeatDefinition {
         ident: String,
@@ -98,11 +169,17 @@ pub enum CompileError {
         #[label = "here"]
         span: SourceSpan,
     },
-
     #[error("Undefined symbol '{ident}'")]
     UndefinedSymbol {
         ident: String,
         #[label = "here"]
+        span: SourceSpan,
+    },
+    #[error("Stack changed within block.  Before: {before:?}  After: {after:?}")]
+    StackChanged {
+        before: Vec<Type>,
+        after: Vec<Type>,
+        #[label = "in this loop"]
         span: SourceSpan,
     },
 }
@@ -143,7 +220,7 @@ where
             return Err(CompileError::TypeError2 {
                 span,
                 message: format!(
-                    "Type error: expected {:?} on stack, found {:?}",
+                    "Type error: expected '{}' on stack, found '{}'",
                     expected, ty
                 ),
             });
@@ -173,6 +250,17 @@ where
     }
 
     fn compile_ident(&mut self, Ident { ident, len, span }: &Ident) -> Result<(), CompileError> {
+        if ident == "dump_stack" {
+            dbg!(&self.type_stack);
+            return Ok(());
+        }
+
+        if let Some(ty) = Type::from_ident(ident) {
+            let x = self.pop(*span)?;
+            self.type_stack.push(x.cast_into(ty, *span, &mut self.out)?);
+            return Ok(());
+        };
+
         let Some(ext) = self.extern_functions.get(ident) else {
             return Err(CompileError::UndefinedSymbol {
                 ident: ident.to_string(),
@@ -247,7 +335,6 @@ where
                 } else {
                     let next = self.data.len();
                     let mut s = s.to_string().into_bytes();
-                    s.push(0);
                     self.data.insert(s.into_boxed_slice(), next);
                     next
                 };
@@ -255,12 +342,11 @@ where
                 writeln!(self.out, "    pushq string_{}", n)?;
             }
             AtomKind::CStrLit(s) => {
-                let n = if let Some(n) = self.data.get(s.as_bytes()) {
+                let n = if let Some(n) = self.data.get(s.to_bytes_with_nul()) {
                     *n
                 } else {
                     let next = self.data.len();
-                    let mut s = s.to_string().into_bytes();
-                    s.push(0);
+                    let s = s.clone().into_bytes_with_nul();
                     self.data.insert(s.into_boxed_slice(), next);
                     next
                 };
@@ -272,21 +358,41 @@ where
                 writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
                 writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    add rax, rbx")?;
-                self.type_stack.push(x.add(y)?);
-                writeln!(self.out, "    push rax")?;
+                writeln!(self.out, "    add rbx, rax")?;
+                self.type_stack.push(x.add(y, token.span)?);
+                writeln!(self.out, "    push rbx")?;
             }
             AtomKind::Minus => {
                 let x = self.pop(token.span)?;
-                let y = self.pop(token.span)?;
-                self.type_stack.push(x.add(y)?);
                 writeln!(self.out, "    popq rax")?;
+                let y = self.pop(token.span)?;
                 writeln!(self.out, "    popq rbx")?;
+                writeln!(self.out, "    sub rbx, rax")?;
+                self.type_stack.push(x.sub(y, token.span)?);
+                writeln!(self.out, "    push rbx")?;
             }
             AtomKind::Asterisk => todo!("asterisk"),
             AtomKind::Slash => todo!("slash"),
-            AtomKind::Equal => todo!("equal"),
-            AtomKind::Not => todo!("not"),
+            AtomKind::Equal => {
+                let x = self.pop(token.span)?;
+                let y = self.pop(token.span)?;
+                self.type_stack.push(x.equals(y, token.span)?);
+                writeln!(self.out, "    popq rax")?;
+                writeln!(self.out, "    popq rbx")?;
+                writeln!(self.out, "    cmp rax, rbx")?;
+                writeln!(self.out, "    sete al")?;
+                writeln!(self.out, "    movzx rax, al")?;
+                writeln!(self.out, "    push rax")?;
+            }
+            AtomKind::Not => {
+                let x = self.pop(token.span)?;
+                self.type_stack.push(x.not(token.span)?);
+                writeln!(self.out, "    popq rax")?;
+                writeln!(self.out, "    cmp rax, 0")?;
+                writeln!(self.out, "    sete al")?;
+                writeln!(self.out, "    movzx rax, al")?;
+                writeln!(self.out, "    push rax")?;
+            }
             AtomKind::Dup => {
                 writeln!(self.out, "    popq rax")?;
                 writeln!(self.out, "    pushq rax")?;
@@ -303,22 +409,80 @@ where
         Ok(())
     }
 
-    pub fn compile(mut self) -> Result<(), CompileError> {
-        self.write_header()?;
-        writeln!(self.out)?;
-        writeln!(self.out, r#"public main"#)?;
-        writeln!(self.out, r#"main:"#)?;
+    fn compile_while(
+        &mut self,
+        While {
+            while_token,
+            condition,
+            body,
+        }: &While,
+    ) -> Result<(), CompileError> {
+        let start = self.type_stack.clone();
 
-        for a in self.ast {
+        // general structure:
+        // ```asm
+        //     jmp .while_end_0
+        // .while_0:
+        //     ; body
+        //  .while_end_0:
+        //     ; condition
+        //     popq rax
+        //     cmp rax, 0
+        //     jne .while_0
+        // ```
+
+        writeln!(self.out, "    jmp .while_end_{}", while_token.span.offset())?;
+        writeln!(self.out, ".while_{}:", while_token.span.offset())?;
+        self.compile_body(body)?;
+        if start != self.type_stack {
+            // TODO: show a diff instead of before/after?
+            return Err(CompileError::StackChanged {
+                span: while_token.span,
+                before: start,
+                after: self.type_stack.clone(),
+            });
+        }
+        writeln!(self.out, ".while_end_{}:", while_token.span.offset())?;
+        self.compile_body(condition)?;
+        self.pop_type(while_token.span, Type::Bool)?;
+        writeln!(self.out, "    popq rax")?;
+        writeln!(self.out, "    cmp rax, 0")?;
+        writeln!(self.out, "    jne .while_{}", while_token.span.offset())?;
+
+        if start != self.type_stack {
+            // TODO: show a diff instead of before/after?
+            return Err(CompileError::StackChanged {
+                span: while_token.span,
+                before: start,
+                after: self.type_stack.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    fn compile_body(&mut self, ast: &[Ast]) -> Result<(), CompileError> {
+        for a in ast {
             match a {
                 Ast::Ident(ident) => self.compile_ident(ident)?,
                 Ast::Atom(atom) => self.compile_atom(atom)?,
                 Ast::ExternFn(_) => {}
                 Ast::Fn(_) => todo!(),
                 Ast::Then(_) => todo!(),
-                Ast::While(_) => todo!(),
+                Ast::While(w) => self.compile_while(w)?,
             }
+            writeln!(self.out)?;
         }
+
+        Ok(())
+    }
+
+    pub fn compile(mut self) -> Result<(), CompileError> {
+        self.write_header()?;
+        writeln!(self.out)?;
+        writeln!(self.out, r#"public main"#)?;
+        writeln!(self.out, r#"main:"#)?;
+
+        self.compile_body(self.ast)?;
 
         if !self.type_stack.is_empty() {
             if self.cli.auto_drop {
@@ -336,7 +500,9 @@ where
                     writeln!(self.out, "    popq rax")?;
                 }
             } else {
-                return Err(CompileError::StackNotEmpty);
+                return Err(CompileError::StackNotEmpty {
+                    stack: self.type_stack,
+                });
             }
         }
 

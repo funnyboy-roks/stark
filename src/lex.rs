@@ -1,4 +1,4 @@
-use std::{borrow::Cow, num::ParseIntError, ops::Range};
+use std::{borrow::Cow, ffi::CString, num::ParseIntError, ops::Range};
 
 use miette::{Diagnostic, SourceSpan};
 use phf::phf_map;
@@ -65,7 +65,7 @@ pub enum TokenValue {
 
     // Lits
     StrLit(String),
-    CStrLit(String),
+    CStrLit(CString),
     IntLit(i64),
     // FloatLit(i64), // TODO
 
@@ -379,7 +379,11 @@ impl Iterator for Lexer<'_> {
                 ('c', Some('"')) => {
                     self.offset += 1;
                     return Some(self.take_strlit().map(|n| {
-                        Token::new(start..self.offset, self.file, TokenValue::CStrLit(n))
+                        Token::new(
+                            start..self.offset,
+                            self.file,
+                            TokenValue::CStrLit(CString::new(n).unwrap()),
+                        )
                     }));
                 }
                 ('a'..='z' | 'A'..='Z' | '_', _) => {
@@ -472,7 +476,7 @@ impl Iterator for Lexer<'_> {
                     return Some(Ok(Token::new(
                         start..self.offset,
                         self.file,
-                        TokenValue::Equal,
+                        TokenValue::Not,
                     )));
                 }
                 ('"', _) => {

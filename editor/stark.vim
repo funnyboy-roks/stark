@@ -24,12 +24,12 @@ syntax keyword Keyword dup drop extern fn
 syntax keyword Boolean true false
 syntax keyword Debug dump_stack
 
-syntax keyword Conditional if then else while switch
+syntax keyword Conditional then else while
 syntax keyword Label case default
 
 syntax keyword Type i64 i32 i16 i8
 syntax keyword Type u64 u32 u16 u8
-syntax keyword Type ptr bool
+syntax keyword Type ptr fatptr bool
 
 syntax region Block start=/{/ end=/}/ transparent fold
 
