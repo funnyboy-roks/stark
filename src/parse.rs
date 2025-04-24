@@ -104,10 +104,10 @@ pub struct Fn {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElseThen {
-    else_token: Token,
-    then_token: Token,
-    condition: Vec<Ast>,
-    body: Vec<Ast>,
+    pub else_token: Token,
+    pub then_token: Token,
+    pub condition: Vec<Ast>,
+    pub body: Vec<Ast>,
 }
 
 /// ```stark
@@ -118,8 +118,7 @@ pub struct Then {
     pub then_token: Token,
     pub body: Vec<Ast>,
     pub else_thens: Vec<ElseThen>,
-    pub else_token: Option<Token>,
-    pub else_body: Option<Vec<Ast>>,
+    pub elze: Option<(Vec<Ast>, Token)>,
 }
 
 /// ```stark
@@ -420,8 +419,7 @@ impl<'a> Parser<'a> {
                     then_token,
                     body,
                     else_thens,
-                    else_token: None,
-                    else_body: None,
+                    elze: None,
                 });
             };
 
@@ -432,8 +430,7 @@ impl<'a> Parser<'a> {
                         then_token,
                         body,
                         else_thens: Vec::new(),
-                        else_token: Some(else_token),
-                        else_body: Some(else_body),
+                        elze: Some((else_body, else_token)),
                     });
                 }
                 None => {

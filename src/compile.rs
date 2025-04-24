@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     cli::Cli,
     lex::LexError,
-    parse::{Ast, Atom, AtomKind, ExternFn, Ident, While},
+    parse::{Ast, Atom, AtomKind, ExternFn, Ident, Then, While},
 };
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -460,6 +460,63 @@ where
         Ok(())
     }
 
+    fn compile_then(
+        &mut self,
+        Then {
+            then_token,
+            body,
+            else_thens,
+            elze,
+        }: &Then,
+    ) -> Result<(), CompileError> {
+        let id = then_token.span.offset();
+        self.pop_type(then_token.span, Type::Bool)?;
+        let start = self.type_stack.clone();
+        writeln!(self.out, "    popq rax")?;
+        writeln!(self.out, "    cmp rax, 0")?;
+        writeln!(self.out, "    jne .then_end_{}", id)?;
+        self.compile_body(body)?;
+        writeln!(self.out, ".then_end_{}:", id)?;
+        for (i, et) in else_thens.iter().enumerate() {
+            let then_end = std::mem::replace(&mut self.type_stack, start.clone());
+            self.compile_body(&et.condition)?;
+            self.pop_type(then_token.span, Type::Bool)?;
+            writeln!(self.out, "    popq rax")?;
+            writeln!(self.out, "    cmp rax, 0")?;
+            writeln!(self.out, "    jne .then_end_{}_{}", id, i)?;
+            self.compile_body(&et.body)?;
+            writeln!(self.out, ".then_end_{}_{}:", id, i)?;
+            if then_end != self.type_stack {
+                // TODO: show a diff instead of before/after?
+                return Err(CompileError::StackChanged {
+                    span: et.then_token.span,
+                    before: then_end,
+                    after: self.type_stack.clone(),
+                });
+            }
+        }
+        if let Some((else_body, else_token)) = elze {
+            let then_end = std::mem::replace(&mut self.type_stack, start.clone());
+            self.compile_body(else_body)?;
+            if then_end != self.type_stack {
+                // TODO: show a diff instead of before/after?
+                return Err(CompileError::StackChanged {
+                    span: else_token.span,
+                    before: then_end,
+                    after: self.type_stack.clone(),
+                });
+            }
+        } else if start != self.type_stack {
+            // TODO: show a diff instead of before/after?
+            return Err(CompileError::StackChanged {
+                span: then_token.span,
+                before: start,
+                after: self.type_stack.clone(),
+            });
+        }
+        Ok(())
+    }
+
     fn compile_body(&mut self, ast: &[Ast]) -> Result<(), CompileError> {
         for a in ast {
             match a {
@@ -467,7 +524,7 @@ where
                 Ast::Atom(atom) => self.compile_atom(atom)?,
                 Ast::ExternFn(_) => {}
                 Ast::Fn(_) => todo!(),
-                Ast::Then(_) => todo!(),
+                Ast::Then(t) => self.compile_then(t)?,
                 Ast::While(w) => self.compile_while(w)?,
             }
             writeln!(self.out)?;
@@ -508,6 +565,7 @@ where
 
         writeln!(self.out, "    mov rax, 0")?;
         writeln!(self.out, "    ret")?;
+        writeln!(self.out)?;
 
         for (s, n) in self.data {
             writeln!(self.out, "string_{}:", n)?;

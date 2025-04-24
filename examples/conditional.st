@@ -1,18 +1,23 @@
+extern fn printf(ptr ...) -> (i64);
 // Hrmm...  if vs then?
 
 // More traditional
 5 2 + 7 = then {
-    "hello" printf
+    c"hello" printf
 } else {
-    "world" printf
-}
+    c"world" printf
+} drop
+c"\n" printf drop
 
 // Less confusing since the predicate comes _before_
 5 2 + 7 = then {
-    "hello" printf
+    c"hello" printf
 } else 1 2 = then {
-    "world" printf
-}
+    c"world" printf
+} else {
+    c"goodbye" printf
+} drop
+c"\n" printf drop
 
 // Maybe _EITHER_ :eyes:
 
