@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use crate::lexer::{LexError, Token, TokenKind};
+use crate::lex::{LexError, Token, TokenKind};
 
 #[derive(Debug, Clone, Hash)]
 pub enum Value {

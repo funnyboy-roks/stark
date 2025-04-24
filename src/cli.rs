@@ -5,8 +5,8 @@ use clap::Parser;
 #[derive(Debug, Clone, Parser)]
 pub struct Cli {
     #[clap(short, long)]
-    pub interpret: bool,
-    #[clap(short, long, conflicts_with = "interpret")]
+    pub parse: bool,
+    #[clap(short, long, conflicts_with = "parse")]
     pub lex: bool,
 
     #[clap(long)]
