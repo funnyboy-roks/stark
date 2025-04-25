@@ -24,17 +24,15 @@ extern fn printf(ptr ...) -> (i64);
 - [x] Loops
     - [ ] Labels: `while'x`
     - [ ] break: `break` or `break'x` -- still need to check that the stack has not changed
-- [ ] Conditionals (see [conditionals.st](./examples/conditional.st))
-    - [ ] `then`
-    - [ ] `else`
+- [x] Conditionals (see [conditionals.st](./examples/conditional.st))
+    - [x] `then`
+    - [x] `else`
     - [ ] `switch`? 
 - [ ] Non-decimal integer literals
-- [ ] Full suite of numbers: i8, i16, i32, i64, u8, u16, u32, u64
+- [x] Full suite of numbers: i8, i16, i32, i64, u8, u16, u32, u64
 - [x] Miette + thiserror for better errors
-- [ ] Type system
-    - [ ] Somehow validate that functions are using the correct args
-    - [ ] Function overloading of sorts (maybe just for native functions,
-      i.e., print)- both `10 print` and `"hello" print` should work
+- [x] Type system
+    - [x] Somehow validate that functions are using the correct args
 - [ ] Functions
     - [x] Extern functions
         - `extern fn strlen(ptr) -> (i64);`
