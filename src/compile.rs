@@ -9,11 +9,140 @@ use crate::{
     parse::{Ast, Atom, AtomKind, ExternFn, Ident, Then, While},
 };
 
+/// Docs from https://wiki.osdev.org/CPU_Registers_x86-64#General_Purpose_Registers
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum Register {
+    /// Accumulator
+    Rax,
+    /// Base
+    Rbx,
+    /// Counter
+    Rcx,
+    /// Data (commonly extends the A register)
+    Rdx,
+    /// Source index for string operations
+    Rsi,
+    /// Destination index for string operations
+    Rdi,
+    /// Stack Pointer
+    Rsp,
+    /// Base Pointer (meant for stack frames)
+    Rbp,
+    /// General purpose
+    R8,
+    /// General purpose
+    R9,
+    /// General purpose
+    R10,
+    /// General purpose
+    R11,
+    /// General purpose
+    R12,
+    /// General purpose
+    R13,
+    /// General purpose
+    R14,
+    /// General purpose
+    R15,
+}
+
+impl Register {
+    pub const ARG_REGS: [Self; 6] = [
+        Self::Rdi,
+        Self::Rsi,
+        Self::Rdx,
+        Self::Rcx,
+        Self::R8,
+        Self::R9,
+    ];
+
+    pub fn for_size(self, size: u32) -> &'static str {
+        macro_rules! registers {
+            (N = $c: literal) => {
+                match size {
+                    1 => concat!("r", $c, "b"),
+                    2 => concat!("r", $c, "w"),
+                    4 => concat!("r", $c, "d"),
+                    8 => concat!("r", $c),
+                    _ => panic!("invalid size: {}", size),
+                }
+            };
+            ($c: literal) => {
+                match size {
+                    1 => concat!($c, "l"),
+                    2 => concat!($c, "x"),
+                    4 => concat!("e", $c, "x"),
+                    8 => concat!("r", $c, "x"),
+                    _ => panic!("invalid size: {}", size),
+                }
+            };
+            ($qword: literal, $dword: literal, $word: literal, $byte: literal) => {
+                match size {
+                    1 => $byte,
+                    2 => $word,
+                    4 => $dword,
+                    8 => $qword,
+                    _ => panic!("invalid size: {}", size),
+                }
+            };
+        }
+
+        match self {
+            Register::Rax => registers!("a"),
+            Register::Rbx => registers!("b"),
+            Register::Rcx => registers!("c"),
+            Register::Rdx => registers!("d"),
+            Register::Rsi => registers!("rsi", "esi", "si", "sil"),
+            Register::Rdi => registers!("rdi", "edi", "di", "dil"),
+            Register::Rsp => registers!("rsp", "esp", "sp", "spl"),
+            Register::Rbp => registers!("rbp", "ebp", "bp", "bpl"),
+            Register::R8 => registers!(N = 8),
+            Register::R9 => registers!(N = 9),
+            Register::R10 => registers!(N = 10),
+            Register::R11 => registers!(N = 11),
+            Register::R12 => registers!(N = 12),
+            Register::R13 => registers!(N = 13),
+            Register::R14 => registers!(N = 14),
+            Register::R15 => registers!(N = 15),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum Value {
+    Immediate(i64),
+    Label(String),
+    Register(Register),
+}
+
+impl From<String> for Value {
+    fn from(value: String) -> Self {
+        Self::Label(value)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Self::Immediate(value)
+    }
+}
+
+impl From<Register> for Value {
+    fn from(value: Register) -> Self {
+        Self::Register(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum Type {
-    // TODO: I8, I16, ..
-    // TODO: U8, U16, ..
     I64,
+    I32,
+    I16,
+    I8,
+    U64,
+    U32,
+    U16,
+    U8,
     // TODO: typed pointers
     Pointer,
     // TODO: make this work
@@ -25,6 +154,13 @@ impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::I64 => write!(f, "i64"),
+            Type::I32 => write!(f, "i32"),
+            Type::I16 => write!(f, "i16"),
+            Type::I8 => write!(f, "i8"),
+            Type::U64 => write!(f, "u64"),
+            Type::U32 => write!(f, "u32"),
+            Type::U16 => write!(f, "u16"),
+            Type::U8 => write!(f, "u8"),
             Type::Pointer => write!(f, "ptr"),
             Type::FatPointer => write!(f, "fatptr"),
             Type::Bool => write!(f, "bool"),
@@ -33,9 +169,158 @@ impl Display for Type {
 }
 
 impl Type {
-    fn add(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
-        match (self, lhs) {
-            (Type::I64, Type::I64) => Ok(Type::I64),
+    fn push(self, out: &mut impl Write, value: impl Into<Value>) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        // allocate
+        ;
+        match value.into() {
+            // TODO: immediate can have different sizes
+            Value::Immediate(n) => {
+                writeln!(out, "    pushq {}", n)?;
+            }
+            Value::Label(l) => writeln!(out, "    push {}", l)?,
+            Value::Register(register) => {
+                writeln!(out, "    pushq {}", register.for_size(8))?;
+                // writeln!(out, "    sub rsp, 8")?;
+                // writeln!(
+                //     out,
+                //     "    mov {} [rsp+{}] {}",
+                //     pneumonic(self.size()),
+                //     8 - self.size(),
+                //     register.for_size(self.size())
+                // )?;
+            }
+        };
+
+        Ok(())
+    }
+
+    fn pop(self, out: &mut impl Write, register: Register) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        writeln!(out, "    popq {}", register.for_size(8))?;
+        if self.size() < 4 {
+            writeln!(
+                out,
+                "    {} {}, {}",
+                if self.signed() { "movsx" } else { "movzx" },
+                register.for_size(8),
+                register.for_size(self.size())
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn pop_as(
+        self,
+        out: &mut impl Write,
+        register: Register,
+        target: Self,
+    ) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        writeln!(out, "    popq {}", register.for_size(8))?;
+        if self.size() < 4 {
+            writeln!(
+                out,
+                "    {} {}, {}",
+                if target.signed() { "movsx" } else { "movzx" },
+                register.for_size(8),
+                register.for_size(self.size())
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn pop_zeroed(self, out: &mut impl Write, register: Register) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        writeln!(out, "    popq {}", register.for_size(8))?;
+        if self.size() < 4 {
+            writeln!(
+                out,
+                "    movzx {}, {}",
+                register.for_size(8),
+                register.for_size(self.size())
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn drop(self, out: &mut impl Write) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        writeln!(out, "    add rsp, 8")?;
+
+        Ok(())
+    }
+
+    const fn is_int(self) -> bool {
+        match self {
+            Type::I64
+            | Type::I32
+            | Type::I16
+            | Type::I8
+            | Type::U64
+            | Type::U32
+            | Type::U16
+            | Type::U8 => true,
+            Type::Pointer => false, // TODO: is this an int?
+            Type::FatPointer => false,
+            Type::Bool => false, // TODO: is this an int?
+        }
+    }
+
+    const fn is_value(self) -> bool {
+        match self {
+            Type::I32 => true,
+            Type::I64 => true,
+            Type::I16 => true,
+            Type::I8 => true,
+            Type::U32 => true,
+            Type::U64 => true,
+            Type::U16 => true,
+            Type::U8 => true,
+            Type::Pointer => true,
+            Type::FatPointer => false,
+            Type::Bool => true,
+        }
+    }
+
+    const fn signed(self) -> bool {
+        match self {
+            Type::I32 => true,
+            Type::I64 => true,
+            Type::I16 => true,
+            Type::I8 => true,
+            Type::U32 => false,
+            Type::U64 => false,
+            Type::U16 => false,
+            Type::U8 => false,
+            Type::Pointer => false,
+            Type::FatPointer => false,
+            Type::Bool => false,
+        }
+    }
+
+    fn add(self, rhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
+        match (self, rhs) {
+            (a, b) if a.is_int() && a == b => Ok(a),
+
             (Type::I64, Type::Pointer) => Ok(Type::Pointer),
             (Type::Pointer, Type::I64) => Ok(Type::Pointer),
             (Type::Pointer, Type::Pointer) => Err(CompileError::TypeError2 {
@@ -89,11 +374,26 @@ impl Type {
     ) -> Result<Type, CompileError> {
         match (self, target) {
             (Type::I64, Type::Bool) => {
-                writeln!(out, "    popq rax")?;
+                self.pop(out, Register::Rax)?;
+                //writeln!(out, "    popq rax")?;
                 writeln!(out, "    cmp rax, 0")?;
                 writeln!(out, "    setne al")?;
                 writeln!(out, "    movzx rax, al")?;
-                writeln!(out, "    pushq rax")?;
+                target.push(out, Register::Rax)?;
+                Ok(target)
+            }
+            // downcast
+            (a, b) if a.is_int() && b.is_int() && a.size() > b.size() => {
+                writeln!(out, "    ; cast {} into {}", self, target)?;
+                self.pop_zeroed(out, Register::Rax)?;
+                target.push(out, Register::Rax)?;
+                Ok(target)
+            }
+            // upcast
+            (a, b) if a.is_int() && b.is_int() && a.size() <= b.size() => {
+                writeln!(out, "    ; cast {} into {}", self, target)?;
+                self.pop_as(out, Register::Rax, target)?;
+                target.push(out, Register::Rax)?;
                 Ok(target)
             }
             _ => Err(CompileError::TypeError2 {
@@ -106,6 +406,15 @@ impl Type {
     fn from_ident(ident: &str) -> Option<Type> {
         match ident {
             "i64" => Some(Self::I64),
+            "i32" => Some(Self::I32),
+            "i16" => Some(Self::I16),
+            "i8" => Some(Self::I8),
+
+            "u64" => Some(Self::U64),
+            "u32" => Some(Self::U32),
+            "u16" => Some(Self::U16),
+            "u8" => Some(Self::U8),
+
             "ptr" => Some(Self::Pointer),
             "fatptr" => Some(Self::FatPointer), // TODO: "fatptr" is bad
             "bool" => Some(Self::Bool),
@@ -113,9 +422,12 @@ impl Type {
         }
     }
 
-    pub fn size(self) -> u32 {
+    pub const fn size(self) -> u32 {
         match self {
-            Type::I64 => 8,
+            Type::I64 | Type::U64 => 8,
+            Type::I32 | Type::U32 => 4,
+            Type::I16 | Type::U16 => 2,
+            Type::I8 | Type::U8 => 1,
             Type::Pointer => 8,
             Type::FatPointer => 8 + 8,
             Type::Bool => 1,
@@ -214,7 +526,7 @@ where
             .ok_or(CompileError::StackUnderflow { span })
     }
 
-    fn pop_type(&mut self, span: SourceSpan, expected: Type) -> Result<(), CompileError> {
+    fn pop_type(&mut self, span: SourceSpan, expected: Type) -> Result<Type, CompileError> {
         let ty = self.pop(span)?;
         if ty != expected {
             return Err(CompileError::TypeError2 {
@@ -225,7 +537,7 @@ where
                 ),
             });
         }
-        Ok(())
+        Ok(expected)
     }
 
     pub fn write_header(&mut self) -> Result<(), CompileError> {
@@ -271,8 +583,6 @@ where
         let ext = ext.clone();
 
         let len = len.unwrap_or(ext.args.len() as u32);
-        let registers = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
-
         if (ext.variadic && (len as usize) < ext.args.len())
             || (!ext.variadic && ext.args.len() != len as usize)
         {
@@ -292,28 +602,31 @@ where
         }
 
         for i in 0..len as usize {
-            if let Some(r) = registers.get(i) {
-                writeln!(self.out, "    popq {}", r)?;
-            }
-
-            if i < ext.args.len() {
-                self.pop_type(*span, Type::from_ident(&ext.args[i]).expect("TODO"))?;
-            } else {
-                self.pop(*span)?;
+            if let Some(r) = Register::ARG_REGS.get(i) {
+                let ty = if i < ext.args.len() {
+                    self.pop_type(*span, Type::from_ident(&ext.args[i]).expect("TODO"))?
+                } else {
+                    self.pop(*span)?
+                };
+                ty.pop(&mut self.out, *r)?;
+                // writeln!(self.out, "    pop {}", r)?;
             }
         }
+
+        let var_types = &self.type_stack
+            [self.type_stack.len() - (len as usize).saturating_sub(Register::ARG_REGS.len())..];
 
         writeln!(self.out, "    mov rax, 0")?;
         writeln!(self.out, "    call {}", ext.linker_name)?;
-        for i in 0..len as usize {
-            // Pop _our_ arguments from the stack (this is kinda sus, ngl)
-            // TODO: validate this is correct
-            if i >= registers.len() {
-                writeln!(self.out, "    popq rdi")?;
-            }
+        // Pop _our_ arguments from the stack (this is kinda sus, ngl)
+        // TODO: validate this is correct
+        for t in var_types {
+            t.drop(&mut self.out)?;
+            // writeln!(self.out, "    popq rdi")?;
         }
         if !ext.returns.is_empty() {
-            writeln!(self.out, "    pushq rax")?;
+            let ty = Type::from_ident(&ext.returns[0]).expect("TODO");
+            ty.push(&mut self.out, Register::Rax)?;
         }
 
         for t in ext.returns {
@@ -325,7 +638,8 @@ where
     fn compile_atom(&mut self, Atom { kind, token }: &Atom) -> Result<(), CompileError> {
         match kind {
             AtomKind::IntLit(n) => {
-                writeln!(self.out, "    pushq {}", n)?;
+                // writeln!(self.out, "    pushq {}", n)?;
+                Type::I64.push(&mut self.out, *n)?;
                 self.type_stack.push(Type::I64);
             }
             // TODO: Fat pointers
@@ -339,7 +653,8 @@ where
                     next
                 };
                 self.type_stack.push(Type::FatPointer);
-                writeln!(self.out, "    pushq string_{}", n)?;
+                // writeln!(self.out, "    pushq string_{}", n)?;
+                Type::Pointer.push(&mut self.out, format!("string_{}", n))?;
             }
             AtomKind::CStrLit(s) => {
                 let n = if let Some(n) = self.data.get(s.to_bytes_with_nul()) {
@@ -351,94 +666,147 @@ where
                     next
                 };
                 self.type_stack.push(Type::Pointer);
-                writeln!(self.out, "    pushq string_{}", n)?;
+                // writeln!(self.out, "    pushq string_{}", n)?;
+                Type::Pointer.push(&mut self.out, format!("string_{}", n))?;
             }
             AtomKind::Plus => {
                 let x = self.pop(token.span)?;
-                writeln!(self.out, "    popq rax")?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
-                writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    add rbx, rax")?;
-                self.type_stack.push(x.add(y, token.span)?);
+                // writeln!(self.out, "    popq rbx")?;
+                y.pop(&mut self.out, Register::Rbx)?;
+                writeln!(
+                    self.out,
+                    "    add {}, {}",
+                    Register::Rbx.for_size(y.size()),
+                    Register::Rax.for_size(x.size())
+                )?;
+                let z = x.add(y, token.span)?;
+                self.type_stack.push(z);
                 writeln!(self.out, "    push rbx")?;
             }
             AtomKind::Minus => {
                 let x = self.pop(token.span)?;
-                writeln!(self.out, "    popq rax")?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
-                writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    sub rbx, rax")?;
-                self.type_stack.push(x.sub(y, token.span)?);
-                writeln!(self.out, "    push rbx")?;
+                // writeln!(self.out, "    popq rbx")?;
+                y.pop(&mut self.out, Register::Rbx)?;
+                writeln!(
+                    self.out,
+                    "    sub {}, {}",
+                    Register::Rbx.for_size(y.size()),
+                    Register::Rax.for_size(x.size())
+                )?;
+                let z = x.sub(y, token.span)?;
+                self.type_stack.push(z);
+                z.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    push rbx")?;
             }
             AtomKind::Asterisk => todo!("asterisk"),
             AtomKind::Slash => todo!("slash"),
             AtomKind::Equal => {
+                // let z = x == y;
                 let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
-                self.type_stack.push(x.equals(y, token.span)?);
-                writeln!(self.out, "    popq rax")?;
-                writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    cmp rax, rbx")?;
+                y.pop(&mut self.out, Register::Rbx)?;
+                writeln!(
+                    self.out,
+                    "    cmp {}, {}",
+                    Register::Rbx.for_size(y.size()),
+                    Register::Rax.for_size(x.size())
+                )?;
                 writeln!(self.out, "    sete al")?;
                 writeln!(self.out, "    movzx rax, al")?;
-                writeln!(self.out, "    push rax")?;
+                let z = x.equals(y, token.span)?;
+                self.type_stack.push(z);
+                z.push(&mut self.out, Register::Rax)?;
             }
             AtomKind::Not => {
                 let x = self.pop(token.span)?;
-                self.type_stack.push(x.not(token.span)?);
-                writeln!(self.out, "    popq rax")?;
-                writeln!(self.out, "    cmp rax, 0")?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
+                writeln!(self.out, "    cmp {}, 0", Register::Rax.for_size(x.size()))?;
                 writeln!(self.out, "    sete al")?;
                 writeln!(self.out, "    movzx rax, al")?;
-                writeln!(self.out, "    push rax")?;
+                let y = x.not(token.span)?;
+                self.type_stack.push(y);
+                y.push(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    push rax")?;
             }
             AtomKind::Lt => {
                 let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
-                self.type_stack.push(x.equals(y, token.span)?);
-                writeln!(self.out, "    popq rax")?;
-                writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    cmp rbx, rax")?;
+                y.pop(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    popq rbx")?;
+                writeln!(
+                    self.out,
+                    "    cmp {}, {}",
+                    Register::Rbx.for_size(y.size()),
+                    Register::Rax.for_size(x.size())
+                )?;
                 writeln!(self.out, "    setl al")?;
                 writeln!(self.out, "    movzx rax, al")?;
-                writeln!(self.out, "    push rax")?;
+                let z = x.equals(y, token.span)?;
+                z.push(&mut self.out, Register::Rax)?;
+                self.type_stack.push(z);
+                // writeln!(self.out, "    push rax")?;
             }
             AtomKind::Dup => {
-                writeln!(self.out, "    popq rax")?;
-                writeln!(self.out, "    pushq rax")?;
-                writeln!(self.out, "    pushq rax")?;
                 let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 self.type_stack.push(x);
+                x.push(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    pushq rax")?;
                 self.type_stack.push(x);
+                x.push(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    pushq rax")?;
             }
             AtomKind::Dup2 => {
-                writeln!(self.out, "    popq rax")?;
-                writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    pushq rbx")?;
-                writeln!(self.out, "    pushq rax")?;
-                writeln!(self.out, "    pushq rbx")?;
-                writeln!(self.out, "    pushq rax")?;
                 let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
+                y.pop(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    popq rbx")?;
+
                 self.type_stack.push(y);
+                y.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    pushq rbx")?;
                 self.type_stack.push(x);
+                x.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    pushq rax")?;
                 self.type_stack.push(y);
+                y.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    pushq rbx")?;
                 self.type_stack.push(x);
+                x.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    pushq rax")?;
             }
             AtomKind::Swap => {
-                writeln!(self.out, "    popq rax")?;
-                writeln!(self.out, "    popq rbx")?;
-                writeln!(self.out, "    pushq rax")?;
-                writeln!(self.out, "    pushq rbx")?;
                 let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rax)?;
+                // writeln!(self.out, "    popq rax")?;
                 let y = self.pop(token.span)?;
+                y.pop(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    popq rbx")?;
+
                 self.type_stack.push(x);
+                x.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    pushq rax")?;
                 self.type_stack.push(y);
+                y.push(&mut self.out, Register::Rbx)?;
+                // writeln!(self.out, "    pushq rbx")?;
             }
             AtomKind::Drop => {
-                writeln!(self.out, "    popq rax")?;
-                let _ = self.pop(token.span)?;
+                let x = self.pop(token.span)?;
+                x.drop(&mut self.out)?;
             }
         }
         Ok(())
@@ -557,7 +925,7 @@ where
             match a {
                 Ast::Ident(ident) => self.compile_ident(ident)?,
                 Ast::Atom(atom) => self.compile_atom(atom)?,
-                Ast::ExternFn(_) => {}
+                Ast::ExternFn(_) => continue,
                 Ast::Fn(_) => todo!(),
                 Ast::Then(t) => self.compile_then(t)?,
                 Ast::While(w) => self.compile_while(w)?,
