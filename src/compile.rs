@@ -780,13 +780,13 @@ where
                 y.push(&mut self.out, Register::Rbx)?;
                 // writeln!(self.out, "    pushq rbx")?;
                 self.type_stack.push(x);
-                x.push(&mut self.out, Register::Rbx)?;
+                x.push(&mut self.out, Register::Rax)?;
                 // writeln!(self.out, "    pushq rax")?;
                 self.type_stack.push(y);
                 y.push(&mut self.out, Register::Rbx)?;
                 // writeln!(self.out, "    pushq rbx")?;
                 self.type_stack.push(x);
-                x.push(&mut self.out, Register::Rbx)?;
+                x.push(&mut self.out, Register::Rax)?;
                 // writeln!(self.out, "    pushq rax")?;
             }
             AtomKind::Swap => {
@@ -798,7 +798,7 @@ where
                 // writeln!(self.out, "    popq rbx")?;
 
                 self.type_stack.push(x);
-                x.push(&mut self.out, Register::Rbx)?;
+                x.push(&mut self.out, Register::Rax)?;
                 // writeln!(self.out, "    pushq rax")?;
                 self.type_stack.push(y);
                 y.push(&mut self.out, Register::Rbx)?;
