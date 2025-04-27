@@ -22,7 +22,7 @@ extern fn printf(ptr ...) -> (i64);
 
 - [x] Compilation
 - [x] Loops
-    - [ ] Labels: `while'x`
+    - [ ] Labels: `'x` `while'x` (I like the idea of having this "tick" syntax like rust)
     - [ ] break: `break` or `break'x` -- still need to check that the stack has not changed
 - [x] Conditionals (see [conditionals.st](./examples/conditional.st))
     - [x] `then`
@@ -36,9 +36,12 @@ extern fn printf(ptr ...) -> (i64);
 - [ ] Functions
     - [x] Extern functions
         - `extern fn strlen(ptr) -> (i64);`
-    - [ ] User-defined functions
+    - [x] User-defined functions
         - `fn double(i64) -> (i64) { dup + }`
         - type check function: stack = args, compile body, assert(stack = results)
+        - [ ] Need to see if we can clean up the generated assembly
+        - [ ] Ideally use linux calling convention so we can export the
+          functions for use from other langauges
 - [ ] Macros
 - [ ] Modules
     - [ ] Imports
