@@ -99,13 +99,13 @@ pub struct ExternFn {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fn {
-    name: String,
-    ident: Token,
-    args: Vec<String>,
+    pub name: String,
+    pub ident: Token,
+    pub args: Vec<String>,
     // TODO: should we allow variadics in user-defined fns?
     // variadic: bool,
-    returns: Vec<String>,
-    body: Vec<Ast>,
+    pub returns: Vec<String>,
+    pub body: Vec<Ast>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,6 +339,29 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn take_fn(&mut self) -> Result<Fn, ParseError> {
+        // expect_token!(self, Extern);
+        // expect_token!(self, Fn);
+        let (ident_token, ident) = expect_token!(self, Ident(_));
+        expect_token!(self, LParen);
+        // TODO: allow variadic?
+        let (args, _) = self.take_args(false)?;
+        expect_token!(self, Arrow);
+        expect_token!(self, LParen);
+        let (returns, _) = self.take_args(false)?;
+        let (body_open, ()) = expect_token!(self, LCurly);
+
+        let (body, _) = self.take_body(TokenKind::RCurly, Some(&body_open))?;
+
+        Ok(Fn {
+            name: ident.to_string(),
+            ident: ident_token,
+            args,
+            returns,
+            body,
+        })
+    }
+
     // this is very similar to parse, maybe we want to combine them?
     fn take_body(
         &mut self,
@@ -531,7 +554,10 @@ impl<'a> Parser<'a> {
                     let f = self.take_extern_fn()?;
                     out.push(Ast::ExternFn(f));
                 }
-                TokenValue::Fn => {}
+                TokenValue::Fn => {
+                    let f = self.take_fn()?;
+                    out.push(Ast::Fn(f));
+                }
                 TokenValue::Then => {
                     let t = self.take_then(token)?;
                     out.push(Ast::Then(t));

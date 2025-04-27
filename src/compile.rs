@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     cli::Cli,
     lex::LexError,
-    parse::{Ast, Atom, AtomKind, ExternFn, Ident, Then, While},
+    parse::{Ast, Atom, AtomKind, ExternFn, Fn, Ident, Then, While},
 };
 
 /// Docs from https://wiki.osdev.org/CPU_Registers_x86-64#General_Purpose_Registers
@@ -494,6 +494,14 @@ pub enum CompileError {
         #[label = "in this loop"]
         span: SourceSpan,
     },
+
+    #[error("Incorrect stack result in function.  Expected: {expected:?}  Actual: {actual:?}")]
+    IncorrectStackResults {
+        expected: Vec<Type>,
+        actual: Vec<Type>,
+        #[label = "in this function"]
+        span: SourceSpan,
+    },
 }
 
 pub struct Compiler<'a, W> {
@@ -502,6 +510,7 @@ pub struct Compiler<'a, W> {
     type_stack: Vec<Type>,
     data: HashMap<Box<[u8]>, usize>,
     extern_functions: HashMap<String, ExternFn>,
+    functions: HashMap<String, Fn>,
     out: W,
 }
 
@@ -516,6 +525,7 @@ where
             type_stack: Default::default(),
             data: Default::default(),
             extern_functions: Default::default(),
+            functions: Default::default(),
             out,
         }
     }
@@ -544,6 +554,19 @@ where
         writeln!(self.out, r#"format ELF64"#)?;
         writeln!(self.out, r#"section ".text" executable"#)?;
 
+        self.functions = self
+            .ast
+            .iter()
+            .filter_map(|x| match x {
+                Ast::Ident(_) => None,
+                Ast::Atom(_) => None,
+                Ast::ExternFn(_) => None,
+                Ast::Fn(f) => Some((f.name.clone(), f.clone())),
+                Ast::Then(_) => None,
+                Ast::While(_) => None,
+            })
+            .collect();
+
         for x in self.ast {
             match x {
                 Ast::Ident(_) => {}
@@ -552,7 +575,94 @@ where
                     self.extern_functions.insert(f.name.clone(), f.clone());
                     writeln!(self.out, "extrn {}", f.linker_name)?;
                 }
-                Ast::Fn(_) => {}
+                Ast::Fn(f) => {
+                    self.functions.insert(f.name.clone(), f.clone());
+                    writeln!(self.out, "{}:", f.name)?;
+
+                    // XXX: This is the current implementation of how stark functions are called.
+                    // I hate it.  Something better must be created.
+                    //
+                    // Stack after `call` instruction:
+                    //     +--------------- +
+                    //     | return pointer |
+                    //     +--------------- +
+                    //     |     fn arg1    |
+                    //     +--------------- +
+                    //     |     fn arg0    |
+                    //     +----------------+
+                    //     |       ...      |
+                    //     +----------------+
+                    //
+                    // Move the return pointer to be _below_ the args
+                    //     +--------------- +
+                    //     |     fn arg1    |
+                    //     +--------------- +
+                    //     |     fn arg0    |
+                    //     +----------------+
+                    //     | return pointer |
+                    //     +--------------- +
+                    //     |       ...      |
+                    //     +----------------+
+                    //
+                    // After fn body, restore return pointer onto the top stack for `ret`:
+                    //     +--------------- +
+                    //     | return pointer |
+                    //     +--------------- +
+                    //     |    return1     |
+                    //     +--------------- +
+                    //     |    return0     |
+                    //     +----------------+
+                    //     |       ...      |
+                    //     +----------------+
+
+                    writeln!(self.out, "    mov rax, [rsp]")?; // save the return pointer
+                    writeln!(self.out)?;
+                    writeln!(self.out, "    mov rdi, rsp")?; // rdi is the destination for the `movsq` instruction
+                    writeln!(self.out, "    mov rsi, rsp")?; // rsi is the source for the `movsq` instruction
+                    writeln!(self.out, "    add rsi, 8")?; // rsi+8 to shift everything down
+                    writeln!(self.out)?;
+                    writeln!(self.out, "    mov rcx, {}", f.args.len())?; // repeat for each arg
+                    writeln!(self.out, "    cld")?; // clear direction flag so `rep` increments
+                    writeln!(self.out, "    rep movsq")?;
+                    writeln!(self.out, "    mov [rsp+{}], rax", f.args.len() * 8)?; // save the return address on the bottom of the stack
+
+                    let old_stack = std::mem::replace(
+                        &mut self.type_stack,
+                        f.args
+                            .iter()
+                            .map(|a| Type::from_ident(a).expect("TODO"))
+                            .collect(),
+                    );
+                    self.compile_body(&f.body)?;
+                    let returns = f
+                        .returns
+                        .iter()
+                        .map(|a| Type::from_ident(a).expect("TODO"))
+                        .collect();
+                    if self.type_stack != returns {
+                        return Err(CompileError::IncorrectStackResults {
+                            expected: returns,
+                            actual: self.type_stack.clone(),
+                            span: f.ident.span,
+                        });
+                    }
+                    self.type_stack = old_stack;
+
+                    writeln!(self.out, "    mov rax, [rsp+{}]", f.returns.len() * 8)?; // get the return address from the bottom of the stack
+                    writeln!(self.out)?;
+                    writeln!(self.out, "    mov rsi, rsp")?;
+                    writeln!(self.out, "    add rsi, {}", (f.returns.len() - 1) * 8)?;
+                    writeln!(self.out, "    mov rdi, rsp")?;
+                    writeln!(self.out, "    add rdi, {}", f.returns.len() * 8)?;
+                    writeln!(self.out)?;
+                    writeln!(self.out, "    std")?; // set direction flag so `rep` decrements
+                    writeln!(self.out, "    mov rcx, {}", f.returns.len())?;
+                    writeln!(self.out, "    rep movsq")?;
+                    writeln!(self.out)?;
+                    writeln!(self.out, "    mov [rsp], rax")?;
+                    writeln!(self.out, "    ret")?;
+                    writeln!(self.out)?;
+                }
                 Ast::Then(_) => {}
                 Ast::While(_) => {}
             }
@@ -561,27 +671,11 @@ where
         Ok(())
     }
 
-    fn compile_ident(&mut self, Ident { ident, len, span }: &Ident) -> Result<(), CompileError> {
-        if ident == "dump_stack" {
-            dbg!(&self.type_stack);
-            return Ok(());
-        }
-
-        if let Some(ty) = Type::from_ident(ident) {
-            let x = self.pop(*span)?;
-            self.type_stack.push(x.cast_into(ty, *span, &mut self.out)?);
-            return Ok(());
-        };
-
-        let Some(ext) = self.extern_functions.get(ident) else {
-            return Err(CompileError::UndefinedSymbol {
-                ident: ident.to_string(),
-                span: *span,
-            });
-        };
-        // TODO
-        let ext = ext.clone();
-
+    fn call_extern_fn(
+        &mut self,
+        Ident { len, span, .. }: &Ident,
+        ext: ExternFn,
+    ) -> Result<(), CompileError> {
         let len = len.unwrap_or(ext.args.len() as u32);
         if (ext.variadic && (len as usize) < ext.args.len())
             || (!ext.variadic && ext.args.len() != len as usize)
@@ -632,6 +726,72 @@ where
         for t in ext.returns {
             self.type_stack.push(Type::from_ident(&t).expect("TODO"));
         }
+        Ok(())
+    }
+
+    fn call_fn(&mut self, Ident { len, span, .. }: &Ident, f: Fn) -> Result<(), CompileError> {
+        let len = len.unwrap_or(f.args.len() as u32);
+        if f.args.len() != len as usize {
+            return Err(CompileError::IncorrectExplicitArgSize {
+                expected: f.args.len(),
+                actual: len as usize,
+                span: *span,
+            });
+        }
+
+        for i in 0..len as usize {
+            // TODO: use linux calling convention
+            self.pop_type(*span, Type::from_ident(&f.args[i]).expect("TODO"))?;
+            //if let Some(r) = Register::ARG_REGS.get(i) {
+            //    let ty = if i < ext.args.len() {
+            //    } else {
+            //        self.pop(*span)?
+            //    };
+            //    ty.pop(&mut self.out, *r)?;
+            //    // writeln!(self.out, "    pop {}", r)?;
+            //}
+        }
+
+        // let var_types = &self.type_stack
+        //     [self.type_stack.len() - (len as usize).saturating_sub(Register::ARG_REGS.len())..];
+
+        // fn: foo(i32, i32) -> (i32)
+        // stack after `call`: [a, b, c, RET]
+        // -> [a, RET, d]
+
+        writeln!(self.out, "    mov rax, 0")?;
+        writeln!(self.out, "    call {}", f.name)?;
+
+        for t in f.returns {
+            self.type_stack.push(Type::from_ident(&t).expect("TODO"));
+        }
+        Ok(())
+    }
+
+    fn compile_ident(&mut self, ident: &Ident) -> Result<(), CompileError> {
+        if ident.ident == "dump_stack" {
+            dbg!(&self.type_stack);
+            return Ok(());
+        }
+
+        if let Some(ty) = Type::from_ident(&ident.ident) {
+            let x = self.pop(ident.span)?;
+            self.type_stack
+                .push(x.cast_into(ty, ident.span, &mut self.out)?);
+            return Ok(());
+        };
+
+        if let Some(ext) = self.extern_functions.get(&ident.ident) {
+            self.call_extern_fn(ident, ext.clone())?;
+        } else if let Some(f) = self.functions.get(&ident.ident) {
+            self.call_fn(ident, f.clone())?;
+        } else {
+            return Err(CompileError::UndefinedSymbol {
+                ident: ident.ident.to_string(),
+                span: ident.span,
+            });
+        };
+        // TODO
         Ok(())
     }
 
@@ -926,7 +1086,7 @@ where
                 Ast::Ident(ident) => self.compile_ident(ident)?,
                 Ast::Atom(atom) => self.compile_atom(atom)?,
                 Ast::ExternFn(_) => continue,
-                Ast::Fn(_) => todo!(),
+                Ast::Fn(_) => continue,
                 Ast::Then(t) => self.compile_then(t)?,
                 Ast::While(w) => self.compile_while(w)?,
             }
