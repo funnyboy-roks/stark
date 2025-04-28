@@ -17,6 +17,7 @@ syntax region Comment start=/\/\// end=/$/ contains=Todo
 syntax match SpecialChar contained /\\./
 syntax region String start=/c\?"/ end=/"/ contains=SpecialChar
 
+syntax match Label /'[a-zA-Z0-9_]\+/
 syntax match Function /\.\.\./
 
 syntax keyword Keyword extern fn

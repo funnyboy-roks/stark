@@ -27,6 +27,7 @@ pub enum AtomKind {
     Equal,
     Not,
     Lt,
+    Percent,
 
     // Keywords
     Dup,
@@ -56,6 +57,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Equal => Ok(Self::Equal),
             TokenValue::Not => Ok(Self::Not),
             TokenValue::Lt => Ok(Self::Lt),
+            TokenValue::Percent => Ok(Self::Percent),
             TokenValue::Ellipsis => Err(()),
             TokenValue::Arrow => Err(()),
             TokenValue::Dup => Ok(Self::Dup),
@@ -415,6 +417,7 @@ impl<'a> Parser<'a> {
                 TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Percent => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
@@ -461,7 +464,7 @@ impl<'a> Parser<'a> {
                     return Ok(Then {
                         then_token,
                         body,
-                        else_thens: Vec::new(),
+                        else_thens,
                         elze: Some((else_body, else_token)),
                     });
                 }
@@ -543,6 +546,7 @@ impl<'a> Parser<'a> {
                 TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Percent => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,

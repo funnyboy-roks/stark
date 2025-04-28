@@ -39,6 +39,7 @@ pub enum TokenKind {
     Equal,
     Not,
     Lt,
+    Percent,
 
     // Symbols
     /// `...`
@@ -82,6 +83,7 @@ pub enum TokenValue {
     Equal,
     Not,
     Lt,
+    Percent,
 
     // Symbols
     /// `...`
@@ -128,6 +130,7 @@ impl TokenValue {
             TokenValue::Equal => TokenKind::Equal,
             TokenValue::Not => TokenKind::Not,
             TokenValue::Lt => TokenKind::Lt,
+            TokenValue::Percent => TokenKind::Percent,
             TokenValue::Ellipsis => TokenKind::Ellipsis,
             TokenValue::Arrow => TokenKind::Arrow,
             TokenValue::Dup => TokenKind::Dup,
@@ -496,6 +499,14 @@ impl Iterator for Lexer<'_> {
                         start..self.offset,
                         self.file,
                         TokenValue::Lt,
+                    )));
+                }
+                ('%', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Percent,
                     )));
                 }
                 ('"', _) => {

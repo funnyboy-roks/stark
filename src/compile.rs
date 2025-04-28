@@ -336,7 +336,7 @@ impl Type {
 
     fn sub(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
         match (self, lhs) {
-            (Type::I64, Type::I64) => Ok(Type::I64),
+            (a, b) if a.is_int() && a == b => Ok(a),
             (Type::Pointer, Type::I64) => Ok(Type::Pointer),
             _ => Err(CompileError::TypeError2 {
                 message: "TODO: Type errors".into(),
@@ -347,8 +347,28 @@ impl Type {
 
     fn equals(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
         match (self, lhs) {
-            (Type::I64, Type::I64) => Ok(Type::Bool),
+            (a, b) if a.is_int() && a == b => Ok(Self::Bool),
             (Type::Pointer, Type::Pointer) => Ok(Type::Bool),
+            _ => Err(CompileError::TypeError2 {
+                message: "TODO: Type errors".into(),
+                span,
+            }),
+        }
+    }
+
+    fn modulo(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
+        match (self, lhs) {
+            (a, b) if a.is_int() && a == b => Ok(a),
+            _ => Err(CompileError::TypeError2 {
+                message: "TODO: Type errors".into(),
+                span,
+            }),
+        }
+    }
+
+    fn div(self, lhs: Self, span: SourceSpan) -> Result<Type, CompileError> {
+        match (self, lhs) {
+            (a, b) if a.is_int() && a == b => Ok(a),
             _ => Err(CompileError::TypeError2 {
                 message: "TODO: Type errors".into(),
                 span,
@@ -648,18 +668,20 @@ where
                     }
                     self.type_stack = old_stack;
 
-                    writeln!(self.out, "    mov rax, [rsp+{}]", f.returns.len() * 8)?; // get the return address from the bottom of the stack
-                    writeln!(self.out)?;
-                    writeln!(self.out, "    mov rsi, rsp")?;
-                    writeln!(self.out, "    add rsi, {}", (f.returns.len() - 1) * 8)?;
-                    writeln!(self.out, "    mov rdi, rsp")?;
-                    writeln!(self.out, "    add rdi, {}", f.returns.len() * 8)?;
-                    writeln!(self.out)?;
-                    writeln!(self.out, "    std")?; // set direction flag so `rep` decrements
-                    writeln!(self.out, "    mov rcx, {}", f.returns.len())?;
-                    writeln!(self.out, "    rep movsq")?;
-                    writeln!(self.out)?;
-                    writeln!(self.out, "    mov [rsp], rax")?;
+                    if !f.returns.is_empty() {
+                        writeln!(self.out, "    mov rax, [rsp+{}]", f.returns.len() * 8)?; // get the return address from the bottom of the stack
+                        writeln!(self.out)?;
+                        writeln!(self.out, "    mov rsi, rsp")?;
+                        writeln!(self.out, "    add rsi, {}", (f.returns.len() - 1) * 8)?;
+                        writeln!(self.out, "    mov rdi, rsp")?;
+                        writeln!(self.out, "    add rdi, {}", f.returns.len() * 8)?;
+                        writeln!(self.out)?;
+                        writeln!(self.out, "    std")?; // set direction flag so `rep` decrements
+                        writeln!(self.out, "    mov rcx, {}", f.returns.len())?;
+                        writeln!(self.out, "    rep movsq")?;
+                        writeln!(self.out)?;
+                        writeln!(self.out, "    mov [rsp], rax")?;
+                    }
                     writeln!(self.out, "    ret")?;
                     writeln!(self.out)?;
                 }
@@ -864,8 +886,31 @@ where
                 z.push(&mut self.out, Register::Rbx)?;
                 // writeln!(self.out, "    push rbx")?;
             }
-            AtomKind::Asterisk => todo!("asterisk"),
-            AtomKind::Slash => todo!("slash"),
+            AtomKind::Asterisk => {
+                let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rbx)?;
+                let y = self.pop(token.span)?;
+                y.pop(&mut self.out, Register::Rax)?;
+                // TODO: `imul` if sized, else `mul`
+                writeln!(self.out, "    imul {}", Register::Rbx.for_size(y.size()))?;
+                let z = x.modulo(y, token.span)?;
+                z.push(&mut self.out, Register::Rax)?;
+                self.type_stack.push(z);
+                // writeln!(self.out, "    push rax")?;
+            }
+            AtomKind::Slash => {
+                let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rbx)?;
+                let y = self.pop(token.span)?;
+                y.pop(&mut self.out, Register::Rax)?;
+                // TODO: `idiv` if sized, else `div`
+                writeln!(self.out, "    cdq")?;
+                writeln!(self.out, "    idiv {}", Register::Rbx.for_size(y.size()))?;
+                let z = x.div(y, token.span)?;
+                z.push(&mut self.out, Register::Rax)?;
+                self.type_stack.push(z);
+                // writeln!(self.out, "    push rax")?;
+            }
             AtomKind::Equal => {
                 // let z = x == y;
                 let x = self.pop(token.span)?;
@@ -916,6 +961,18 @@ where
                 z.push(&mut self.out, Register::Rax)?;
                 self.type_stack.push(z);
                 // writeln!(self.out, "    push rax")?;
+            }
+            AtomKind::Percent => {
+                let x = self.pop(token.span)?;
+                x.pop(&mut self.out, Register::Rbx)?;
+                let y = self.pop(token.span)?;
+                y.pop(&mut self.out, Register::Rax)?;
+                // TODO: `idiv` if sized, else `div`
+                writeln!(self.out, "    cdq")?;
+                writeln!(self.out, "    idiv {}", Register::Rbx.for_size(y.size()),)?;
+                let z = x.modulo(y, token.span)?;
+                z.push(&mut self.out, Register::Rdx)?;
+                self.type_stack.push(z);
             }
             AtomKind::Dup => {
                 let x = self.pop(token.span)?;
@@ -1037,18 +1094,27 @@ where
         let start = self.type_stack.clone();
         writeln!(self.out, "    popq rax")?;
         writeln!(self.out, "    cmp rax, 0")?;
-        writeln!(self.out, "    jne .then_end_{}", id)?;
+        if elze.is_some() {
+            writeln!(self.out, "    je .else_{}_{}", id, 0)?;
+        } else {
+            writeln!(self.out, "    je .then_end_{}", id)?;
+        }
         self.compile_body(body)?;
-        writeln!(self.out, ".then_end_{}:", id)?;
+        writeln!(self.out, "    jmp .then_end_{}", id)?;
         for (i, et) in else_thens.iter().enumerate() {
             let then_end = std::mem::replace(&mut self.type_stack, start.clone());
+            writeln!(self.out, ".else_{}_{}:", id, i)?;
             self.compile_body(&et.condition)?;
             self.pop_type(then_token.span, Type::Bool)?;
             writeln!(self.out, "    popq rax")?;
             writeln!(self.out, "    cmp rax, 0")?;
-            writeln!(self.out, "    jne .then_end_{}_{}", id, i)?;
+            if i == else_thens.len() - 1 && elze.is_none() {
+                writeln!(self.out, "    je .then_end_{}", id)?;
+            } else {
+                writeln!(self.out, "    je .else_{}_{}", id, i + 1)?;
+            }
             self.compile_body(&et.body)?;
-            writeln!(self.out, ".then_end_{}_{}:", id, i)?;
+            writeln!(self.out, "    jmp .then_end_{}", id)?;
             if then_end != self.type_stack {
                 // TODO: show a diff instead of before/after?
                 return Err(CompileError::StackChanged {
@@ -1059,6 +1125,7 @@ where
             }
         }
         if let Some((else_body, else_token)) = elze {
+            writeln!(self.out, ".else_{}_{}:", id, else_thens.len())?;
             let then_end = std::mem::replace(&mut self.type_stack, start.clone());
             self.compile_body(else_body)?;
             if then_end != self.type_stack {
@@ -1077,6 +1144,7 @@ where
                 after: self.type_stack.clone(),
             });
         }
+        writeln!(self.out, ".then_end_{}:", id)?;
         Ok(())
     }
 
