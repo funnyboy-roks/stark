@@ -41,9 +41,11 @@ extern fn printf(ptr ...) -> (i64);
         - `extern fn strlen(ptr) -> (i64);`
         - [ ] Ability to change the linker symbol for this function- not
           sure on the syntax yet:
-              - `extern fn strlen(ptr) -> (i32) @extern("strlen");`
-              - `extern("strlen") fn strlen(ptr) -> (i32);`
-              - `extern fn strlen(ptr) -> (i32) @ "strlen";`
+          ```zig
+          extern fn strlen(ptr) -> (i32) @extern("strlen");
+          extern("strlen") fn strlen(ptr) -> (i32);
+          extern fn strlen(ptr) -> (i32) @ "strlen";
+          ```
     - [x] User-defined functions
         - `fn double(i64) -> (i64) { dup + }`
         - type check function: stack = args, compile body, assert(stack = results)
