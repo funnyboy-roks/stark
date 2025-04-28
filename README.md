@@ -28,6 +28,9 @@ extern fn printf(ptr ...) -> (i64);
     - [x] `then`
     - [x] `else`
     - [ ] `switch`? 
+- [ ] Error handling
+    - [ ] Report good type errors
+    - [ ] Continue after error and report all at once
 - [ ] Non-decimal integer literals
 - [x] Full suite of numbers: i8, i16, i32, i64, u8, u16, u32, u64
 - [x] Miette + thiserror for better errors
@@ -36,6 +39,11 @@ extern fn printf(ptr ...) -> (i64);
 - [ ] Functions
     - [x] Extern functions
         - `extern fn strlen(ptr) -> (i64);`
+        - [ ] Ability to change the linker symbol for this function- not
+          sure on the syntax yet:
+              - `extern fn strlen(ptr) -> (i32) @extern("strlen");`
+              - `extern("strlen") fn strlen(ptr) -> (i32);`
+              - `extern fn strlen(ptr) -> (i32) @ "strlen";`
     - [x] User-defined functions
         - `fn double(i64) -> (i64) { dup + }`
         - type check function: stack = args, compile body, assert(stack = results)
