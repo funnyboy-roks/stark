@@ -1,0 +1,2 @@
+# Zig highlighting is _okay_.  It's far from perfect, but it's better than the default smalltalk.
+*.st linguist-language=zig
