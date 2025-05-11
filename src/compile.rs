@@ -985,35 +985,32 @@ where
             }
             AtomKind::Dup => {
                 let x = self.pop(token.span)?;
-                x.pop(&mut self.out, Register::Rax)?;
-                // writeln!(self.out, "    popq rax")?;
-                x.push(&mut self.out, Register::Rax)?;
+                let size = x.size();
+                assert!(size % 8 == 0);
+                writeln!(self.out, "    mov rsi, rsp")?;
+                writeln!(self.out, "    sub rsp, {}", size)?;
+                writeln!(self.out, "    mov rdi, rsp")?;
+                writeln!(self.out, "    mov rcx, {}", size / 8)?;
+                writeln!(self.out, "    rep movsq")?;
                 self.type_stack.push(x.clone());
-                // writeln!(self.out, "    pushq rax")?;
-                x.push(&mut self.out, Register::Rax)?;
                 self.type_stack.push(x);
-                // writeln!(self.out, "    pushq rax")?;
             }
             AtomKind::Dup2 => {
                 let x = self.pop(token.span)?;
-                x.pop(&mut self.out, Register::Rax)?;
-                // writeln!(self.out, "    popq rax")?;
-                let y = self.pop(token.span)?;
-                y.pop(&mut self.out, Register::Rbx)?;
-                // writeln!(self.out, "    popq rbx")?;
-
-                y.push(&mut self.out, Register::Rbx)?;
-                self.type_stack.push(y.clone());
-                // writeln!(self.out, "    pushq rbx")?;
-                x.push(&mut self.out, Register::Rax)?;
                 self.type_stack.push(x.clone());
-                // writeln!(self.out, "    pushq rax")?;
-                y.push(&mut self.out, Register::Rbx)?;
+                let y = self.pop(token.span)?;
+                self.type_stack.push(y.clone());
+
+                let size = x.size() + y.size();
+                assert!(size % 8 == 0);
+                writeln!(self.out, "    mov rsi, rsp")?;
+                writeln!(self.out, "    sub rsp, {}", size)?;
+                writeln!(self.out, "    mov rdi, rsp")?;
+                writeln!(self.out, "    mov rcx, {}", size / 8)?;
+                writeln!(self.out, "    rep movsq")?;
+
                 self.type_stack.push(y);
-                // writeln!(self.out, "    pushq rbx")?;
-                x.push(&mut self.out, Register::Rax)?;
                 self.type_stack.push(x);
-                // writeln!(self.out, "    pushq rax")?;
             }
             AtomKind::Swap => {
                 let x = self.pop(token.span)?;

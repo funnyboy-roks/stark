@@ -60,7 +60,7 @@ extern fn printf(*i8 ...) -> (i64);
 - [ ] Better CLI
 - [ ] structs
 - [ ] pointers
-    - [ ] Typed pointers
+    - [x] Typed pointers
         - [ ] Smarter pointer increments (like C)
     - [ ] Fat pointers for things like strings
 - [x] c-strings (null-terminated strings)
