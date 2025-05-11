@@ -1,4 +1,4 @@
-extern fn printf(ptr ...) -> (i32);
+extern fn printf(*i8 ...) -> (i32);
 
 fn quadruple(i64) -> (i64) {
     double double

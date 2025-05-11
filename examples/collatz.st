@@ -1,4 +1,4 @@
-extern fn printf(ptr ...) -> (i64);
+extern fn printf(*i8 ...) -> (i64);
 
 373242
 while dup 1 = ! {

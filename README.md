@@ -5,7 +5,7 @@ A stack-based compiled programming language
 ## Examples
 
 ```zig
-extern fn printf(ptr ...) -> (i64);
+extern fn printf(*i8 ...) -> (i64);
 
 "hello world" printf
 ```
@@ -38,13 +38,13 @@ extern fn printf(ptr ...) -> (i64);
     - [x] Somehow validate that functions are using the correct args
 - [ ] Functions
     - [x] Extern functions
-        - `extern fn strlen(ptr) -> (i64);`
+        - `extern fn strlen(*i8) -> (i64);`
         - [ ] Ability to change the linker symbol for this function- not
           sure on the syntax yet:
           ```zig
-          extern fn strlen(ptr) -> (i32) @extern("strlen");
-          extern("strlen") fn strlen(ptr) -> (i32);
-          extern fn strlen(ptr) -> (i32) @ "strlen";
+          extern fn strlen(*i8) -> (i32) @extern("strlen");
+          extern("strlen") fn strlen(*i8) -> (i32);
+          extern fn strlen(*i8) -> (i32) @ "strlen";
           ```
     - [x] User-defined functions
         - `fn double(i64) -> (i64) { dup + }`

@@ -1,4 +1,4 @@
-extern fn printf(ptr ...) -> (i64);
+extern fn printf(*i8 ...) -> (i64);
 
 // prints 5 4 3 2 1
 5 while dup 0 = ! {

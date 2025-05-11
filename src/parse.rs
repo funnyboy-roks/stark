@@ -13,10 +13,17 @@ pub struct Ident {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeAtom {
+    Ident(String),
+    Pointer(Box<TypeAtom>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AtomKind {
     IntLit(i64),
     StrLit(String),
     CStrLit(CString),
+    Type(TypeAtom),
     // FloatLit(i64), // TODO
 
     // Ops
@@ -94,19 +101,19 @@ pub struct ExternFn {
     pub name: String,
     pub linker_name: String,
     pub ident: Token,
-    pub args: Vec<String>,
+    pub args: Vec<TypeAtom>,
     pub variadic: bool,
-    pub returns: Vec<String>,
+    pub returns: Vec<TypeAtom>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fn {
     pub name: String,
     pub ident: Token,
-    pub args: Vec<String>,
+    pub args: Vec<TypeAtom>,
     // TODO: should we allow variadics in user-defined fns?
     // variadic: bool,
-    pub returns: Vec<String>,
+    pub returns: Vec<TypeAtom>,
     pub body: Vec<Ast>,
 }
 
@@ -282,14 +289,42 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_args(&mut self, allow_variadic: bool) -> Result<(Vec<String>, bool), ParseError> {
+    fn take_type(&mut self) -> Result<TypeAtom, ParseError> {
+        let Some(token) = self.tokens.next() else {
+            return Err(ParseError::UnexpectedEof {
+                expected: "type".into(),
+                matching: None,
+            });
+        };
+
+        let token = token?;
+        match token.value {
+            TokenValue::Asterisk => {
+                let inner = self.take_type()?;
+                Ok(TypeAtom::Pointer(Box::new(inner)))
+            }
+            TokenValue::Ident(ident) => Ok(TypeAtom::Ident(ident)),
+            _ => {
+                return Err(ParseError::unexpected_token(
+                    token,
+                    &[TokenKind::Ident, TokenKind::Asterisk],
+                ))
+            }
+        }
+    }
+
+    fn take_args(&mut self, allow_variadic: bool) -> Result<(Vec<TypeAtom>, bool), ParseError> {
         let mut args = Vec::new();
         let mut variadic = false;
-        for t in &mut self.tokens {
+        while let Some(t) = self.tokens.next() {
             let t = t?;
             match t.value {
                 TokenValue::Ident(ident) if !variadic => {
-                    args.push(ident);
+                    args.push(TypeAtom::Ident(ident));
+                }
+                TokenValue::Asterisk => {
+                    let ty = self.take_type()?;
+                    args.push(TypeAtom::Pointer(Box::new(ty)));
                 }
                 TokenValue::RParen => {
                     break;

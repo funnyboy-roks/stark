@@ -1,4 +1,4 @@
-extern fn printf(ptr ...) -> (i32);
+extern fn printf(*i8 ...) -> (i32);
 
 fn fizzbuzz(i64) -> () {
     dup 15 % 0 = then {
