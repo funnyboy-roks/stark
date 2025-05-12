@@ -1,0 +1,9 @@
+STDOUT:
+    hello world
+    hello world 2
+    hello world 2
+
+STDERR:
+
+
+STATUS: 0
