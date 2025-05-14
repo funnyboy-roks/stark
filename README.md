@@ -67,3 +67,4 @@ extern fn printf(*i8 ...) -> (i64);
     - `c"hello"` -> `"hello", 0`
 - [ ] Auto drop (and other global directives):
     - `@auto_drop` at top of file or something
+- [ ] Asymmetrical strings: `` `' `` or even `«»` (or both!)
