@@ -179,7 +179,8 @@ impl Type {
         match value.into() {
             // TODO: immediate can have different sizes
             Value::Immediate(n) => {
-                writeln!(out, "    pushq {}", n)?;
+                writeln!(out, "    mov rax, {}", n)?;
+                writeln!(out, "    pushq rax")?;
             }
             Value::Label(l) => writeln!(out, "    push {}", l)?,
             Value::Register(register) => {
@@ -1175,6 +1176,8 @@ where
         writeln!(self.out)?;
         writeln!(self.out, r#"public main"#)?;
         writeln!(self.out, r#"main:"#)?;
+        writeln!(self.out, r#"    push rbp"#)?;
+        writeln!(self.out, r#"    mov rbp, rsp"#)?;
 
         self.compile_body(self.ast)?;
 
@@ -1201,6 +1204,7 @@ where
         }
 
         writeln!(self.out, "    mov rax, 0")?;
+        writeln!(self.out, "    pop rbp")?;
         writeln!(self.out, "    ret")?;
         writeln!(self.out)?;
 

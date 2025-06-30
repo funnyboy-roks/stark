@@ -179,9 +179,9 @@ pub enum LexError {
     },
     #[error("Error parsing integer")]
     IntParseError {
-        #[label = "{source}"]
+        #[label = "here"]
         span: SourceSpan,
-        #[source]
+        // #[source]
         source: ParseIntError,
     },
 }
@@ -221,15 +221,59 @@ impl<'a> Lexer<'a> {
 
     fn take_number(&mut self) -> Result<i64, LexError> {
         let start = self.offset;
-        let x = self.content[self.offset + 1..] // skip the first char since we know it's fine
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(self.content.len());
-        let content = &self.content[self.offset..][..x + 1];
-        self.offset += content.len();
-        content.parse().map_err(|e| LexError::IntParseError {
-            span: (start..self.offset).into(),
-            source: e,
-        })
+        let (num, neg) = if self.content[self.offset..]
+            .chars()
+            .next()
+            .expect("Checked by the caller")
+            == '-'
+        {
+            (&self.content[self.offset + 1..], -1)
+        } else {
+            (&self.content[self.offset..], 1)
+        };
+
+        let mut begin = num.chars();
+        let first = begin.next().ok_or(LexError::UnexpectedEof {
+            span: (self.offset..self.offset + 1).into(),
+        })?;
+        let second = begin.next();
+
+        let (string, radix) = match (first, second) {
+            ('0', Some('x')) => {
+                let num = &num[2..];
+                self.offset += 2;
+                let x = num
+                    .find(|c: char| !c.is_ascii_hexdigit())
+                    .unwrap_or(num.len());
+                (&num[..x], 16)
+            }
+            ('0', Some('b')) => {
+                let num = &num[2..];
+                self.offset += 2;
+                let x = num
+                    .find(|c: char| c != '0' && c != '1')
+                    .unwrap_or(num.len());
+                (&num[..x], 2)
+            }
+            ('0', Some(c)) => {
+                return Err(LexError::UnexpectedCharacter {
+                    span: (self.offset..self.offset + 1).into(),
+                    found: c,
+                })
+            }
+            (_, _) => {
+                let x = num.find(|c: char| !c.is_ascii_digit()).unwrap_or(num.len());
+                (&num[..x], 10)
+            }
+        };
+
+        self.offset += string.len();
+        i64::from_str_radix(string, radix)
+            .map(|x| x * neg)
+            .map_err(|e| LexError::IntParseError {
+                span: (start..self.offset).into(),
+                source: e,
+            })
     }
 
     fn take_ident(&mut self) -> Result<Cow<'a, str>, LexError> {

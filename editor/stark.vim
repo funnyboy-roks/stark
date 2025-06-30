@@ -10,6 +10,11 @@ if exists("b:current_syntax")
 endif
 
 
+hi def link starkNumber Number
+hi def link starkDecNumber starkNumber
+hi def link starkHexNumber starkNumber
+hi def link starkBinNumber starkNumber
+
 syntax keyword Todo contained TODO FIXME XXX NOTE
 syntax region Comment start=/\/\*/ end=/\*\// contains=Todo
 syntax region Comment start=/\/\// end=/$/ contains=Todo
@@ -36,6 +41,9 @@ syntax keyword Type ptr fatptr bool
 
 syntax region Block start=/{/ end=/}/ transparent fold
 
-syntax match Number display "\<[0-9][0-9_]*"
+syntax match starkDecNumber display "\<[0-9][0-9_]*"
+syntax match starkHexNumber display "\<0x[a-fA-F0-9_]\+"
+syntax match starkBinNumber display "\<0b[01_]\+"
 
 let b:current_syntax = "stark"
+
