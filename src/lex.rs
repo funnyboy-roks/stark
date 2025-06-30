@@ -1,4 +1,9 @@
-use std::{borrow::Cow, ffi::CString, num::ParseIntError, ops::Range};
+use std::{
+    borrow::Cow,
+    ffi::CString,
+    num::{ParseFloatError, ParseIntError},
+    ops::Range,
+};
 
 use miette::{Diagnostic, SourceSpan};
 use phf::phf_map;
@@ -16,6 +21,32 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "while" => TokenValue::While,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumLitVal {
+    Integer(i64),
+    Float(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u32)]
+pub enum Radix {
+    Bin = 2,
+    Dec = 10,
+    Hex = 16,
+}
+
+impl Radix {
+    pub fn radix(self) -> u32 {
+        self as u32
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NumLit {
+    pub value: NumLitVal,
+    pub radix: Radix,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     Ident,
@@ -28,8 +59,7 @@ pub enum TokenKind {
     // Lits
     StrLit,
     CStrLit,
-    IntLit,
-    // FloatLit(i64), // TODO
+    NumLit,
 
     // Ops
     Plus,
@@ -60,7 +90,7 @@ pub enum TokenKind {
     While,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenValue {
     Ident(String),
     LParen,
@@ -72,7 +102,7 @@ pub enum TokenValue {
     // Lits
     StrLit(String),
     CStrLit(CString),
-    IntLit(i64),
+    NumLit(NumLit),
     // FloatLit(i64), // TODO
 
     // Ops
@@ -122,7 +152,7 @@ impl TokenValue {
             TokenValue::Semicolon => TokenKind::Semicolon,
             TokenValue::StrLit(_) => TokenKind::StrLit,
             TokenValue::CStrLit(_) => TokenKind::CStrLit,
-            TokenValue::IntLit(_) => TokenKind::IntLit,
+            TokenValue::NumLit(_) => TokenKind::NumLit,
             TokenValue::Plus => TokenKind::Plus,
             TokenValue::Minus => TokenKind::Minus,
             TokenValue::Asterisk => TokenKind::Asterisk,
@@ -146,7 +176,7 @@ impl TokenValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub file: String,
     pub span: SourceSpan,
@@ -181,8 +211,21 @@ pub enum LexError {
     IntParseError {
         #[label = "here"]
         span: SourceSpan,
-        // #[source]
+        #[source]
         source: ParseIntError,
+    },
+    #[error("Error parsing float")]
+    FloatParseError {
+        #[label = "here"]
+        span: SourceSpan,
+        #[source]
+        source: ParseFloatError,
+    },
+    #[error("{} float literals are not supported", .kind)]
+    UnsupportedFloat {
+        #[label = "here"]
+        span: SourceSpan,
+        kind: String,
     },
 }
 
@@ -219,7 +262,7 @@ impl<'a> Lexer<'a> {
         self.offset += end;
     }
 
-    fn take_number(&mut self) -> Result<i64, LexError> {
+    fn take_number(&mut self) -> Result<NumLit, LexError> {
         let start = self.offset;
         let (num, neg) = if self.content[self.offset..]
             .chars()
@@ -238,6 +281,7 @@ impl<'a> Lexer<'a> {
         })?;
         let second = begin.next();
 
+        let mut float = false;
         let (string, radix) = match (first, second) {
             ('0', Some('x')) => {
                 let num = &num[2..];
@@ -245,15 +289,28 @@ impl<'a> Lexer<'a> {
                 let x = num
                     .find(|c: char| !c.is_ascii_hexdigit())
                     .unwrap_or(num.len());
-                (&num[..x], 16)
+                (&num[..x], Radix::Hex)
             }
             ('0', Some('b')) => {
                 let num = &num[2..];
                 self.offset += 2;
                 let x = num
-                    .find(|c: char| c != '0' && c != '1')
+                    .find(|c: char| !matches!(c, '0' | '1'))
                     .unwrap_or(num.len());
-                (&num[..x], 2)
+                (&num[..x], Radix::Bin)
+            }
+            ('0', Some('.')) => {
+                let x = num
+                    .find(|c: char| match c {
+                        c if c.is_ascii_digit() => false,
+                        '.' if !float => {
+                            float = true;
+                            false
+                        }
+                        _ => true,
+                    })
+                    .unwrap_or(num.len());
+                (&num[..x], Radix::Dec)
             }
             ('0', Some(c)) => {
                 return Err(LexError::UnexpectedCharacter {
@@ -262,18 +319,56 @@ impl<'a> Lexer<'a> {
                 })
             }
             (_, _) => {
-                let x = num.find(|c: char| !c.is_ascii_digit()).unwrap_or(num.len());
-                (&num[..x], 10)
+                let x = num
+                    .find(|c: char| match c {
+                        c if c.is_ascii_digit() => false,
+                        '.' if !float => {
+                            float = true;
+                            false
+                        }
+                        _ => true,
+                    })
+                    .unwrap_or(num.len());
+                (&num[..x], Radix::Dec)
             }
         };
 
-        self.offset += string.len();
-        i64::from_str_radix(string, radix)
-            .map(|x| x * neg)
-            .map_err(|e| LexError::IntParseError {
+        if float && radix != Radix::Dec {
+            return Err(LexError::UnsupportedFloat {
                 span: (start..self.offset).into(),
-                source: e,
-            })
+                kind: match radix {
+                    Radix::Bin => "Binary".into(),
+                    Radix::Dec => unreachable!(),
+                    Radix::Hex => "Hexadecimal".into(),
+                },
+            });
+        }
+
+        dbg!(float, string, radix);
+
+        self.offset += string.len();
+        if float {
+            string
+                .parse::<f64>()
+                .map(|x| NumLit {
+                    value: NumLitVal::Float(x * neg as f64),
+                    radix,
+                })
+                .map_err(|e| LexError::FloatParseError {
+                    span: (start..self.offset).into(),
+                    source: e,
+                })
+        } else {
+            i64::from_str_radix(string, radix.radix())
+                .map(|x| NumLit {
+                    value: NumLitVal::Integer(x * neg),
+                    radix,
+                })
+                .map_err(|e| LexError::IntParseError {
+                    span: (start..self.offset).into(),
+                    source: e,
+                })
+        }
     }
 
     fn take_ident(&mut self) -> Result<Cow<'a, str>, LexError> {
@@ -397,7 +492,7 @@ impl Iterator for Lexer<'_> {
                 ('0'..='9', _) => {
                     return Some(
                         self.take_number().map(|n| {
-                            Token::new(start..self.offset, self.file, TokenValue::IntLit(n))
+                            Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
                         }),
                     )
                 }
@@ -414,7 +509,7 @@ impl Iterator for Lexer<'_> {
                 ('-', Some('0'..='9')) => {
                     return Some(
                         self.take_number().map(|n| {
-                            Token::new(start..self.offset, self.file, TokenValue::IntLit(n))
+                            Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
                         }),
                     )
                 }

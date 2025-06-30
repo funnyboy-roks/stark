@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     cli::Cli,
-    lex::LexError,
+    lex::{LexError, NumLitVal},
     parse::{Ast, Atom, AtomKind, ExternFn, Fn, Ident, Then, TypeAtom, While},
 };
 
@@ -825,10 +825,15 @@ where
 
     fn compile_atom(&mut self, Atom { kind, token }: &Atom) -> Result<(), CompileError> {
         match kind {
-            AtomKind::IntLit(n) => {
+            AtomKind::NumLit(n) => {
                 // writeln!(self.out, "    pushq {}", n)?;
-                Type::I64.push(&mut self.out, *n)?;
-                self.type_stack.push(Type::I64);
+                match n.value {
+                    NumLitVal::Integer(n) => {
+                        Type::I64.push(&mut self.out, n)?;
+                        self.type_stack.push(Type::I64);
+                    }
+                    NumLitVal::Float(_) => todo!("compiling float literals"),
+                }
             }
             // TODO: Fat pointers
             AtomKind::StrLit(s) => {

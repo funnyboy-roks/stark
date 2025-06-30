@@ -3,7 +3,7 @@ use std::{ffi::CString, iter::Peekable};
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-use crate::lex::{LexError, Lexer, Token, TokenKind, TokenValue};
+use crate::lex::{LexError, Lexer, NumLit, NumLitVal, Token, TokenKind, TokenValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
@@ -18,9 +18,9 @@ pub enum TypeAtom {
     Pointer(Box<TypeAtom>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AtomKind {
-    IntLit(i64),
+    NumLit(NumLit),
     StrLit(String),
     CStrLit(CString),
     Type(TypeAtom),
@@ -56,7 +56,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Semicolon => Err(()),
             TokenValue::StrLit(s) => Ok(Self::StrLit(s)),
             TokenValue::CStrLit(s) => Ok(Self::CStrLit(s)),
-            TokenValue::IntLit(n) => Ok(Self::IntLit(n)),
+            TokenValue::NumLit(n) => Ok(Self::NumLit(n)),
             TokenValue::Plus => Ok(Self::Plus),
             TokenValue::Minus => Ok(Self::Minus),
             TokenValue::Asterisk => Ok(Self::Asterisk),
@@ -80,7 +80,7 @@ impl TryFrom<TokenValue> for AtomKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Atom {
     pub token: Token,
     pub kind: AtomKind,
@@ -96,7 +96,7 @@ impl TryFrom<Token> for Atom {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExternFn {
     pub name: String,
     pub linker_name: String,
@@ -106,7 +106,7 @@ pub struct ExternFn {
     pub returns: Vec<TypeAtom>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Fn {
     pub name: String,
     pub ident: Token,
@@ -117,7 +117,7 @@ pub struct Fn {
     pub body: Vec<Ast>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ElseThen {
     pub else_token: Token,
     pub then_token: Token,
@@ -128,7 +128,7 @@ pub struct ElseThen {
 /// ```stark
 /// ... then { } else .. then { } else { }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Then {
     pub then_token: Token,
     pub body: Vec<Ast>,
@@ -139,7 +139,7 @@ pub struct Then {
 /// ```stark
 /// ... while x y z { }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct While {
     pub while_token: Token,
     pub condition: Vec<Ast>,
@@ -147,7 +147,7 @@ pub struct While {
 }
 
 // TODO: This isn't really an ast
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Ast {
     Ident(Ident),
     Atom(Atom),
@@ -190,6 +190,12 @@ pub enum ParseError {
         expected: String,
         #[label = "while matching this"]
         matching: Option<SourceSpan>,
+    },
+    #[error("Expected integer, found float value {found}")]
+    ExpectedInteger {
+        #[label = "here"]
+        span: SourceSpan,
+        found: f64,
     },
     #[error("Nested function definitions are not supported")]
     NestedFunction {
@@ -427,8 +433,18 @@ impl<'a> Parser<'a> {
                     }
                     self.tokens.next().unwrap()?;
 
-                    let (_, n) = expect_token!(self, IntLit(_));
+                    let (num, n) = expect_token!(self, NumLit(_));
                     let (rparen, _) = expect_token!(self, RParen);
+
+                    let n = match n.value {
+                        NumLitVal::Integer(n) => n,
+                        NumLitVal::Float(val) => {
+                            return Err(ParseError::ExpectedInteger {
+                                span: num.span,
+                                found: val,
+                            })
+                        }
+                    };
 
                     out.push(Ast::Ident(Ident {
                         ident: s,
@@ -444,7 +460,7 @@ impl<'a> Parser<'a> {
                 TokenValue::Semicolon => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::IntLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
@@ -557,8 +573,18 @@ impl<'a> Parser<'a> {
                     }
                     self.tokens.next().unwrap()?;
 
-                    let (_, n) = expect_token!(self, IntLit(_));
+                    let (num, n) = expect_token!(self, NumLit(_));
                     let (rparen, _) = expect_token!(self, RParen);
+
+                    let n = match n.value {
+                        NumLitVal::Integer(n) => n,
+                        NumLitVal::Float(val) => {
+                            return Err(ParseError::ExpectedInteger {
+                                span: num.span,
+                                found: val,
+                            })
+                        }
+                    };
 
                     out.push(Ast::Ident(Ident {
                         ident,
@@ -574,7 +600,7 @@ impl<'a> Parser<'a> {
                 TokenValue::Semicolon => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::IntLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
