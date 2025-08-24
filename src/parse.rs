@@ -195,7 +195,7 @@ pub enum ParseError {
     ExpectedInteger {
         #[label = "here"]
         span: SourceSpan,
-        found: f64,
+        found: f32,
     },
     #[error("Nested function definitions are not supported")]
     NestedFunction {

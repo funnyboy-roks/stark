@@ -24,7 +24,7 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NumLitVal {
     Integer(i64),
-    Float(f64),
+    Float(f32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -349,9 +349,9 @@ impl<'a> Lexer<'a> {
         self.offset += string.len();
         if float {
             string
-                .parse::<f64>()
+                .parse::<f32>()
                 .map(|x| NumLit {
-                    value: NumLitVal::Float(x * neg as f64),
+                    value: NumLitVal::Float(x * neg as f32),
                     radix,
                 })
                 .map_err(|e| LexError::FloatParseError {
