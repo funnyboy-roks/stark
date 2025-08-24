@@ -1,13 +1,13 @@
-extern fn printf(*i8 ...) -> ();
-extern fn exit(i32) -> ();
+extern fn printf(*i8 ...);
+extern fn exit(i32);
 
-extern fn InitWindow(i32 i32 *i8) -> ();
-extern fn WindowShouldClose() -> (bool);
-extern fn BeginDrawing() -> ();
-extern fn EndDrawing() -> ();
-extern fn ClearBackground(u32) -> ();
-extern fn DrawCircle(i32 i32 f32 u32) -> ();
-extern fn CloseWindow() -> ();
+extern fn InitWindow(i32 i32 *i8);
+extern fn WindowShouldClose -> (bool);
+extern fn BeginDrawing;
+extern fn EndDrawing;
+extern fn ClearBackground(u32);
+extern fn DrawCircle(i32 i32 f32 u32);
+extern fn CloseWindow;
 
 c"hello world" 600 i32 900 i32 InitWindow
 

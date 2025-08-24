@@ -365,12 +365,51 @@ impl<'a> Parser<'a> {
         // expect_token!(self, Extern);
         expect_token!(self, Fn);
         let (ident_token, ident) = expect_token!(self, Ident(_));
-        expect_token!(self, LParen);
-        let (args, variadic) = self.take_args(true)?;
-        expect_token!(self, Arrow);
-        expect_token!(self, LParen);
-        let (returns, _) = self.take_args(false)?;
-        expect_token!(self, Semicolon);
+
+        let Some(next) = self.tokens.peek() else {
+            return Err(ParseError::UnexpectedEof {
+                expected: "token".into(),
+                matching: None,
+            });
+        };
+        let next = next.as_ref().map_err(|e| e.clone())?;
+        let (args, variadic) = match next.kind() {
+            TokenKind::LParen => {
+                expect_token!(self, LParen);
+                self.take_args(true)?
+            }
+            TokenKind::Arrow => (Vec::new(), false),
+            TokenKind::Semicolon => (Vec::new(), false),
+            _ => {
+                return Err(ParseError::unexpected_token(
+                    self.tokens.next().unwrap().expect("error checked above"),
+                    &[TokenKind::LCurly, TokenKind::Arrow],
+                ));
+            }
+        };
+
+        let Some(next) = self.tokens.next() else {
+            return Err(ParseError::UnexpectedEof {
+                expected: "token".into(),
+                matching: None,
+            });
+        };
+        let next = next?;
+        let returns = match next.kind() {
+            TokenKind::Semicolon => Vec::new(),
+            TokenKind::Arrow => {
+                expect_token!(self, LParen);
+                let (returns, _) = self.take_args(false)?;
+                expect_token!(self, Semicolon);
+                returns
+            }
+            _ => {
+                return Err(ParseError::unexpected_token(
+                    next,
+                    &[TokenKind::LCurly, TokenKind::Arrow],
+                ));
+            }
+        };
 
         Ok(ExternFn {
             name: ident.to_string(),
@@ -386,13 +425,52 @@ impl<'a> Parser<'a> {
         // expect_token!(self, Extern);
         // expect_token!(self, Fn);
         let (ident_token, ident) = expect_token!(self, Ident(_));
-        expect_token!(self, LParen);
-        // TODO: allow variadic?
-        let (args, _) = self.take_args(false)?;
-        expect_token!(self, Arrow);
-        expect_token!(self, LParen);
-        let (returns, _) = self.take_args(false)?;
-        let (body_open, ()) = expect_token!(self, LCurly);
+
+        let Some(next) = self.tokens.peek() else {
+            return Err(ParseError::UnexpectedEof {
+                expected: "token".into(),
+                matching: None,
+            });
+        };
+        let next = next.as_ref().map_err(|e| e.clone())?;
+        let (args, _) = match next.kind() {
+            TokenKind::LParen => {
+                expect_token!(self, LParen);
+                // TODO: allow variadic?
+                self.take_args(false)?
+            }
+            TokenKind::Arrow => (Vec::new(), false),
+            TokenKind::LCurly => (Vec::new(), false),
+            _ => {
+                return Err(ParseError::unexpected_token(
+                    self.tokens.next().unwrap().expect("error checked above"),
+                    &[TokenKind::LCurly, TokenKind::Arrow],
+                ));
+            }
+        };
+
+        let Some(next) = self.tokens.next() else {
+            return Err(ParseError::UnexpectedEof {
+                expected: "token".into(),
+                matching: None,
+            });
+        };
+        let next = next?;
+        let (returns, body_open) = match next.kind() {
+            TokenKind::LCurly => (Vec::new(), next),
+            TokenKind::Arrow => {
+                expect_token!(self, LParen);
+                let (returns, _) = self.take_args(false)?;
+                let (body_open, ()) = expect_token!(self, LCurly);
+                (returns, body_open)
+            }
+            _ => {
+                return Err(ParseError::unexpected_token(
+                    next,
+                    &[TokenKind::LCurly, TokenKind::Arrow],
+                ));
+            }
+        };
 
         let (body, _) = self.take_body(TokenKind::RCurly, Some(&body_open))?;
 
