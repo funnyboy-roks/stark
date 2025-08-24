@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write, ops::Deref};
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -109,6 +109,47 @@ impl Register {
     }
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum FloatRegister {
+    Xmm0,
+    Xmm1,
+    Xmm2,
+    Xmm3,
+    Xmm4,
+    Xmm5,
+    Xmm6,
+    Xmm7,
+}
+
+impl FloatRegister {
+    pub const ARG_REGS: [Self; 8] = [
+        Self::Xmm0,
+        Self::Xmm1,
+        Self::Xmm2,
+        Self::Xmm3,
+        Self::Xmm4,
+        Self::Xmm5,
+        Self::Xmm6,
+        Self::Xmm7,
+    ];
+}
+
+impl Display for FloatRegister {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            FloatRegister::Xmm0 => "xmm0",
+            FloatRegister::Xmm1 => "xmm1",
+            FloatRegister::Xmm2 => "xmm2",
+            FloatRegister::Xmm3 => "xmm3",
+            FloatRegister::Xmm4 => "xmm4",
+            FloatRegister::Xmm5 => "xmm5",
+            FloatRegister::Xmm6 => "xmm6",
+            FloatRegister::Xmm7 => "xmm7",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Value {
     Immediate(i64),
@@ -198,6 +239,34 @@ impl Type {
                 // )?;
             }
         };
+
+        Ok(())
+    }
+
+    fn is_float(&self) -> bool {
+        match self {
+            Type::I64
+            | Type::I32
+            | Type::I16
+            | Type::I8
+            | Type::U64
+            | Type::U32
+            | Type::U16
+            | Type::U8
+            | Type::Pointer(_)
+            | Type::FatPointer
+            | Type::Bool => false,
+            Type::F32 => true,
+        }
+    }
+
+    fn pop_float(&self, out: &mut impl Write, register: FloatRegister) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        writeln!(out, "    movss [rsp], {}", register)?;
+        writeln!(out, "    add rsp, 4")?;
 
         Ok(())
     }
@@ -577,7 +646,7 @@ impl DataItems {
 
         for (f, n) in &self.floats {
             writeln!(out, "float_{}:", n)?;
-            writeln!(out, "    dd {:?}", f)?;
+            writeln!(out, "    dd {:?}", **f)?;
         }
         Ok(())
     }
@@ -776,20 +845,35 @@ where
             }
         }
 
-        for i in 0..len as usize {
-            if let Some(r) = Register::ARG_REGS.get(i) {
-                let ty = if i < ext.args.len() {
-                    self.pop_type(*span, Type::from_atom(&ext.args[i]).expect("TODO"))?
+        let mut inti = 0;
+        let mut flti = 0;
+        let mut n: usize = 0;
+        while n < len as usize {
+            if let (Some(r), Some(f)) = (
+                Register::ARG_REGS.get(inti),
+                FloatRegister::ARG_REGS.get(flti),
+            ) {
+                let ty = if n < ext.args.len() {
+                    self.pop_type(*span, Type::from_atom(&ext.args[n]).expect("TODO"))?
                 } else {
                     self.pop(*span)?
                 };
-                ty.pop(&mut self.out, *r)?;
+                if ty.is_float() {
+                    ty.pop_float(&mut self.out, *f)?;
+                    flti += 1;
+                } else {
+                    ty.pop(&mut self.out, *r)?;
+                    inti += 1;
+                }
                 // writeln!(self.out, "    pop {}", r)?;
+            } else {
+                break;
             }
+            n += 1;
         }
 
-        let var_types = &self.type_stack
-            [self.type_stack.len() - (len as usize).saturating_sub(Register::ARG_REGS.len())..];
+        let var_types =
+            &self.type_stack[self.type_stack.len() - (len as usize).saturating_sub(n)..];
 
         writeln!(self.out, "    mov rax, 0")?;
         writeln!(self.out, "    call {}", ext.linker_name)?;
@@ -889,8 +973,9 @@ where
                     NumLitVal::Float(f) => {
                         // Type::F32.push(&mut self.out, f)?;
                         let label = self.data.add_float(f);
-                        writeln!(self.out, "    movss rax, [{}]", label)?;
-                        writeln!(self.out, "    push rax")?;
+                        writeln!(self.out, "    movss xmm0, [{}]", label)?;
+                        writeln!(self.out, "    sub rsp, 4")?;
+                        writeln!(self.out, "    movss [rsp], xmm0")?;
                         self.type_stack.push(Type::F32);
                     }
                 }
