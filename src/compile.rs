@@ -1,10 +1,11 @@
-use std::{collections::HashMap, fmt::Display, io::Write};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write, ops::Deref};
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
     cli::Cli,
+    hash_float::FloatExt,
     lex::{LexError, NumLitVal},
     parse::{Ast, Atom, AtomKind, ExternFn, Fn, Ident, Then, TypeAtom, While},
 };
@@ -108,6 +109,47 @@ impl Register {
     }
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum FloatRegister {
+    Xmm0,
+    Xmm1,
+    Xmm2,
+    Xmm3,
+    Xmm4,
+    Xmm5,
+    Xmm6,
+    Xmm7,
+}
+
+impl FloatRegister {
+    pub const ARG_REGS: [Self; 8] = [
+        Self::Xmm0,
+        Self::Xmm1,
+        Self::Xmm2,
+        Self::Xmm3,
+        Self::Xmm4,
+        Self::Xmm5,
+        Self::Xmm6,
+        Self::Xmm7,
+    ];
+}
+
+impl Display for FloatRegister {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            FloatRegister::Xmm0 => "xmm0",
+            FloatRegister::Xmm1 => "xmm1",
+            FloatRegister::Xmm2 => "xmm2",
+            FloatRegister::Xmm3 => "xmm3",
+            FloatRegister::Xmm4 => "xmm4",
+            FloatRegister::Xmm5 => "xmm5",
+            FloatRegister::Xmm6 => "xmm6",
+            FloatRegister::Xmm7 => "xmm7",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Value {
     Immediate(i64),
@@ -143,6 +185,7 @@ pub enum Type {
     U32,
     U16,
     U8,
+    F32,
     // TODO: typed pointers
     Pointer(Box<Type>),
     // TODO: make this work
@@ -161,6 +204,7 @@ impl Display for Type {
             Type::U32 => write!(f, "u32"),
             Type::U16 => write!(f, "u16"),
             Type::U8 => write!(f, "u8"),
+            Type::F32 => write!(f, "f32"),
             Type::Pointer(inner) => write!(f, "ptr<{}>", inner),
             Type::FatPointer => write!(f, "fatptr"),
             Type::Bool => write!(f, "bool"),
@@ -195,6 +239,34 @@ impl Type {
                 // )?;
             }
         };
+
+        Ok(())
+    }
+
+    fn is_float(&self) -> bool {
+        match self {
+            Type::I64
+            | Type::I32
+            | Type::I16
+            | Type::I8
+            | Type::U64
+            | Type::U32
+            | Type::U16
+            | Type::U8
+            | Type::Pointer(_)
+            | Type::FatPointer
+            | Type::Bool => false,
+            Type::F32 => true,
+        }
+    }
+
+    fn pop_float(&self, out: &mut impl Write, register: FloatRegister) -> Result<(), CompileError> {
+        if !self.is_value() {
+            todo!();
+        }
+
+        writeln!(out, "    movss [rsp], {}", register)?;
+        writeln!(out, "    add rsp, 4")?;
 
         Ok(())
     }
@@ -280,6 +352,7 @@ impl Type {
             | Type::U32
             | Type::U16
             | Type::U8 => true,
+            Type::F32 => false,
             Type::Pointer(_) => false, // TODO: is this an int?
             Type::FatPointer => false,
             Type::Bool => false, // TODO: is this an int?
@@ -296,6 +369,7 @@ impl Type {
             Type::U64 => true,
             Type::U16 => true,
             Type::U8 => true,
+            Type::F32 => true,
             Type::Pointer(_) => true,
             Type::FatPointer => false,
             Type::Bool => true,
@@ -312,6 +386,7 @@ impl Type {
             Type::U64 => false,
             Type::U16 => false,
             Type::U8 => false,
+            Type::F32 => true,
             Type::Pointer(_) => false,
             Type::FatPointer => false,
             Type::Bool => false,
@@ -438,6 +513,8 @@ impl Type {
                     "u16" => Some(Self::U16),
                     "u8" => Some(Self::U8),
 
+                    "f32" => Some(Self::F32),
+
                     "fatptr" => Some(Self::FatPointer), // TODO: "fatptr" is bad
                     "bool" => Some(Self::Bool),
                     _ => None,
@@ -449,7 +526,7 @@ impl Type {
 
     pub const fn size(&self) -> u32 {
         match self {
-            Type::I64 | Type::U64 => 8,
+            Type::I64 | Type::U64 | Type::F32 => 8,
             Type::I32 | Type::U32 => 4,
             Type::I16 | Type::U16 => 2,
             Type::I8 | Type::U8 => 1,
@@ -529,11 +606,57 @@ pub enum CompileError {
     },
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct DataItems {
+    bytes: HashMap<Box<[u8]>, usize>,
+    floats: HashMap<FloatExt<f32>, usize>,
+}
+
+impl DataItems {
+    pub fn add_bytes(&mut self, bytes: Cow<'_, [u8]>) -> String {
+        let n = if let Some(n) = self.bytes.get(bytes.as_ref()) {
+            *n
+        } else {
+            let next = self.bytes.len();
+            let s = bytes.into_owned();
+            self.bytes.insert(s.into_boxed_slice(), next);
+            next
+        };
+        format!("bytes_{}", n)
+    }
+
+    pub fn add_float(&mut self, float: f32) -> String {
+        let len = self.floats.len();
+        let n = self.floats.entry(float.into()).or_insert(len);
+        format!("float_{}", n)
+    }
+
+    pub fn write(&self, mut out: impl Write) -> Result<(), CompileError> {
+        for (s, n) in &self.bytes {
+            writeln!(out, "bytes_{}:", n)?;
+            write!(out, "    db ")?;
+            for (i, c) in s.iter().enumerate() {
+                if i > 0 {
+                    write!(out, ", ")?;
+                }
+                write!(out, "{}", c)?;
+            }
+            writeln!(out)?;
+        }
+
+        for (f, n) in &self.floats {
+            writeln!(out, "float_{}:", n)?;
+            writeln!(out, "    dd {:?}", **f)?;
+        }
+        Ok(())
+    }
+}
+
 pub struct Compiler<'a, W> {
     cli: &'a Cli,
     ast: &'a [Ast],
     type_stack: Vec<Type>,
-    data: HashMap<Box<[u8]>, usize>,
+    data: DataItems,
     extern_functions: HashMap<String, ExternFn>,
     functions: HashMap<String, Fn>,
     out: W,
@@ -722,20 +845,35 @@ where
             }
         }
 
-        for i in 0..len as usize {
-            if let Some(r) = Register::ARG_REGS.get(i) {
-                let ty = if i < ext.args.len() {
-                    self.pop_type(*span, Type::from_atom(&ext.args[i]).expect("TODO"))?
+        let mut inti = 0;
+        let mut flti = 0;
+        let mut n: usize = 0;
+        while n < len as usize {
+            if let (Some(r), Some(f)) = (
+                Register::ARG_REGS.get(inti),
+                FloatRegister::ARG_REGS.get(flti),
+            ) {
+                let ty = if n < ext.args.len() {
+                    self.pop_type(*span, Type::from_atom(&ext.args[n]).expect("TODO"))?
                 } else {
                     self.pop(*span)?
                 };
-                ty.pop(&mut self.out, *r)?;
+                if ty.is_float() {
+                    ty.pop_float(&mut self.out, *f)?;
+                    flti += 1;
+                } else {
+                    ty.pop(&mut self.out, *r)?;
+                    inti += 1;
+                }
                 // writeln!(self.out, "    pop {}", r)?;
+            } else {
+                break;
             }
+            n += 1;
         }
 
-        let var_types = &self.type_stack
-            [self.type_stack.len() - (len as usize).saturating_sub(Register::ARG_REGS.len())..];
+        let var_types =
+            &self.type_stack[self.type_stack.len() - (len as usize).saturating_sub(n)..];
 
         writeln!(self.out, "    mov rax, 0")?;
         writeln!(self.out, "    call {}", ext.linker_name)?;
@@ -832,35 +970,27 @@ where
                         Type::I64.push(&mut self.out, n)?;
                         self.type_stack.push(Type::I64);
                     }
-                    NumLitVal::Float(_) => todo!("compiling float literals"),
+                    NumLitVal::Float(f) => {
+                        // Type::F32.push(&mut self.out, f)?;
+                        let label = self.data.add_float(f);
+                        writeln!(self.out, "    movss xmm0, [{}]", label)?;
+                        writeln!(self.out, "    sub rsp, 4")?;
+                        writeln!(self.out, "    movss [rsp], xmm0")?;
+                        self.type_stack.push(Type::F32);
+                    }
                 }
             }
             // TODO: Fat pointers
             AtomKind::StrLit(s) => {
-                let n = if let Some(n) = self.data.get(s.as_bytes()) {
-                    *n
-                } else {
-                    let next = self.data.len();
-                    let s = s.to_string().into_bytes();
-                    self.data.insert(s.into_boxed_slice(), next);
-                    next
-                };
+                let label = self.data.add_bytes(s.as_bytes().into());
                 self.type_stack.push(Type::FatPointer);
                 // writeln!(self.out, "    pushq string_{}", n)?;
-                Type::FatPointer.push(&mut self.out, format!("string_{}", n))?;
+                Type::FatPointer.push(&mut self.out, label)?;
             }
             AtomKind::CStrLit(s) => {
-                let n = if let Some(n) = self.data.get(s.to_bytes_with_nul()) {
-                    *n
-                } else {
-                    let next = self.data.len();
-                    let s = s.clone().into_bytes_with_nul();
-                    self.data.insert(s.into_boxed_slice(), next);
-                    next
-                };
+                let label = self.data.add_bytes(s.to_bytes_with_nul().into());
                 let ptr = Type::Pointer(Box::new(Type::I8));
-                // writeln!(self.out, "    pushq string_{}", n)?;
-                ptr.push(&mut self.out, format!("string_{}", n))?;
+                ptr.push(&mut self.out, label)?;
                 self.type_stack.push(ptr);
             }
             AtomKind::Type(_) => {
@@ -1213,17 +1343,7 @@ where
         writeln!(self.out, "    ret")?;
         writeln!(self.out)?;
 
-        for (s, n) in self.data {
-            writeln!(self.out, "string_{}:", n)?;
-            write!(self.out, "    db ")?;
-            for (i, c) in s.iter().enumerate() {
-                if i > 0 {
-                    write!(self.out, ", ")?;
-                }
-                write!(self.out, "{}", c)?;
-            }
-            writeln!(self.out)?;
-        }
+        self.data.write(&mut self.out)?;
 
         Ok(())
     }

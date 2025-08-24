@@ -7,6 +7,7 @@ use miette::NamedSource;
 pub mod cli;
 pub mod compile;
 // pub mod eval;
+pub mod hash_float;
 pub mod lex;
 pub mod parse;
 
