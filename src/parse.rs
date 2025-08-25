@@ -41,6 +41,7 @@ pub enum AtomKind {
     Dup2,
     Swap,
     Drop,
+    Break,
 }
 
 impl TryFrom<TokenValue> for AtomKind {
@@ -76,6 +77,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Then => Err(()),
             TokenValue::Else => Err(()),
             TokenValue::While => Err(()),
+            TokenValue::Break => Ok(Self::Break),
         }
     }
 }
@@ -560,7 +562,10 @@ impl<'a> Parser<'a> {
                     out.push(Ast::Then(t));
                 }
                 TokenValue::Else => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::While => Err(ParseError::unexpected_token(token, &[]))?,
+                TokenValue::While => {
+                    out.push(Ast::While(self.take_while(token)?));
+                }
+                TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
             }
         }
 
@@ -709,6 +714,7 @@ impl<'a> Parser<'a> {
                 TokenValue::While => {
                     out.push(Ast::While(self.take_while(token)?));
                 }
+                TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
             }
         }
 

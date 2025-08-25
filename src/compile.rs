@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write, ops::Deref};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write};
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     cli::Cli,
     hash_float::FloatExt,
-    lex::{LexError, NumLitVal},
+    lex::{LexError, NumLitVal, Token},
     parse::{Ast, Atom, AtomKind, ExternFn, Fn, Ident, Then, TypeAtom, While},
 };
 
@@ -215,7 +215,7 @@ impl Display for Type {
 impl Type {
     fn push(&self, out: &mut impl Write, value: impl Into<Value>) -> Result<(), CompileError> {
         if !self.is_value() {
-            todo!();
+            todo!("push for {self}");
         }
 
         // allocate
@@ -659,6 +659,7 @@ pub struct Compiler<'a, W> {
     data: DataItems,
     extern_functions: HashMap<String, ExternFn>,
     functions: HashMap<String, Fn>,
+    loop_stack: Vec<(String, Vec<Type>, Token)>,
     out: W,
 }
 
@@ -674,6 +675,7 @@ where
             data: Default::default(),
             extern_functions: Default::default(),
             functions: Default::default(),
+            loop_stack: Default::default(),
             out,
         }
     }
@@ -1133,9 +1135,9 @@ where
             }
             AtomKind::Dup2 => {
                 let x = self.pop(token.span)?;
-                self.type_stack.push(x.clone());
                 let y = self.pop(token.span)?;
                 self.type_stack.push(y.clone());
+                self.type_stack.push(x.clone());
 
                 let size = x.size() + y.size();
                 assert!(size % 8 == 0);
@@ -1167,6 +1169,19 @@ where
                 let x = self.pop(token.span)?;
                 x.drop(&mut self.out)?;
             }
+            AtomKind::Break => {
+                let (end_label, start_ts, while_token) =
+                    self.loop_stack.pop().expect("TODO: Breaks not in a loop");
+                writeln!(self.out, "    jmp {}", end_label)?;
+                if start_ts != self.type_stack {
+                    // TODO: show a diff instead of before/after?
+                    return Err(CompileError::StackChanged {
+                        span: while_token.span,
+                        before: start_ts,
+                        after: self.type_stack.clone(),
+                    });
+                }
+            }
         }
         Ok(())
     }
@@ -1195,6 +1210,11 @@ where
 
         writeln!(self.out, "    jmp .while_end_{}", while_token.span.offset())?;
         writeln!(self.out, ".while_{}:", while_token.span.offset())?;
+        self.loop_stack.push((
+            format!(".while_{}_break", while_token.span.offset()),
+            start.clone(),
+            while_token.clone(),
+        ));
         self.compile_body(body)?;
         if start != self.type_stack {
             // TODO: show a diff instead of before/after?
@@ -1210,6 +1230,7 @@ where
         writeln!(self.out, "    popq rax")?;
         writeln!(self.out, "    cmp rax, 0")?;
         writeln!(self.out, "    jne .while_{}", while_token.span.offset())?;
+        writeln!(self.out, ".while_{}_break:", while_token.span.offset())?;
 
         if start != self.type_stack {
             // TODO: show a diff instead of before/after?

@@ -19,6 +19,7 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "then" => TokenValue::Then,
     "else" => TokenValue::Else,
     "while" => TokenValue::While,
+    "break" => TokenValue::Break,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,6 +89,7 @@ pub enum TokenKind {
     Then,
     Else,
     While,
+    Break,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +134,7 @@ pub enum TokenValue {
     Then,
     Else,
     While,
+    Break,
 }
 
 impl TokenValue {
@@ -172,6 +175,7 @@ impl TokenValue {
             TokenValue::Then => TokenKind::Then,
             TokenValue::Else => TokenKind::Else,
             TokenValue::While => TokenKind::While,
+            TokenValue::Break => TokenKind::Break,
         }
     }
 }
