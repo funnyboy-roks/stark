@@ -68,3 +68,14 @@ extern fn printf(*i8 ...) -> (i64);
 - [ ] Auto drop (and other global directives):
     - `@auto_drop` at top of file or something
 - [ ] Asymmetrical strings: `` `' `` or even `«»` (or both!)
+- [ ] Stack assertion line suffix:
+      - Syntax: ```bnf
+      <statements> ::= ; to be defined
+      <type> ::= ; to be defined
+      <type_or_range> ::= <type> | ".."
+      <stack_assertion> ::= <type_or_range> | <type_or_range> <stack_assertion>
+      <line> ::= <statements> | <statements> "|" <stack_assertion>
+      ```
+- [ ] Annotate stack function that would generate stack assertions
+      automatically and print to stdout
+- [ ] Proper BNF for the language
