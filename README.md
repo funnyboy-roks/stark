@@ -68,8 +68,9 @@ extern fn printf(*i8 ...) -> (i64);
 - [ ] Auto drop (and other global directives):
     - `@auto_drop` at top of file or something
 - [ ] Asymmetrical strings: `` `' `` or even `«»` (or both!)
-- [ ] Stack assertion line suffix:
-      - Syntax: ```bnf
+- [ ] Optional stack assertion line suffix: `5 dup u32 | .. u64 u32`
+    - Syntax:
+      ```bnf
       <statements> ::= ; to be defined
       <type> ::= ; to be defined
       <type_or_range> ::= <type> | ".."
