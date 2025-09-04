@@ -682,6 +682,7 @@ pub enum Builtin {
     Sub,
     Mul,
     Div,
+    Mod,
     Equal,
     Not,
     NotEqual,
@@ -689,7 +690,6 @@ pub enum Builtin {
     Lte,
     Gt,
     Gte,
-    Mod,
     Dup,
     Dup2,
     Swap,
@@ -740,6 +740,16 @@ impl Builtin {
                 let returns = a.div(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot multiply {} by {}", b, a),
+                })?;
+                Ok((2, returns))
+            }
+            Builtin::Mod => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.modulo(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot perform module of {} by {}", a, b),
                 })?;
                 Ok((2, returns))
             }
@@ -813,16 +823,6 @@ impl Builtin {
                 let returns = a.ord_cmp(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot compare {} and {}", a, b),
-                })?;
-                Ok((2, returns))
-            }
-            Builtin::Mod => {
-                let [b, a] = type_stack
-                    .last_chunk::<2>()
-                    .ok_or(IrGenError::StackUnderflow { span })?;
-                let returns = a.modulo(b).ok_or_else(|| IrGenError::TypeError2 {
-                    span,
-                    message: format!("Cannot perform module of {} by {}", a, b),
                 })?;
                 Ok((2, returns))
             }
@@ -903,6 +903,7 @@ impl Builtin {
             Builtin::Sub => todo!(),
             Builtin::Mul => todo!(),
             Builtin::Div => todo!(),
+            Builtin::Mod => todo!(),
             Builtin::Equal => {
                 let [a_ty, b_ty] = type_stack else {
                     unreachable!("checked by caller")
@@ -964,7 +965,6 @@ impl Builtin {
             Builtin::Lte => todo!(),
             Builtin::Gt => todo!(),
             Builtin::Gte => todo!(),
-            Builtin::Mod => todo!(),
             Builtin::Dup => {
                 ir_stack.extend_from_within(ir_stack.len() - 1..);
                 Ok(())
@@ -1476,6 +1476,7 @@ impl Module {
                 AtomKind::Minus => builtin!(atom, Sub),
                 AtomKind::Asterisk => builtin!(atom, Mul),
                 AtomKind::Slash => builtin!(atom, Div),
+                AtomKind::Percent => builtin!(atom, Mod),
                 AtomKind::Equal => builtin!(atom, Equal),
                 AtomKind::Not => builtin!(atom, Not),
                 AtomKind::Neq => builtin!(atom, NotEqual),
@@ -1483,7 +1484,6 @@ impl Module {
                 AtomKind::Lte => builtin!(atom, Lte),
                 AtomKind::Gt => builtin!(atom, Gt),
                 AtomKind::Gte => builtin!(atom, Gte),
-                AtomKind::Percent => builtin!(atom, Mod),
                 AtomKind::Dup => builtin!(atom, Dup),
                 AtomKind::Dup2 => builtin!(atom, Dup2),
                 AtomKind::Swap => builtin!(atom, Swap),

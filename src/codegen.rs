@@ -242,32 +242,42 @@ impl Builtin {
         type_stack: &mut TypeStack,
     ) -> Result<(), CodeGenError> {
         let len = type_stack.len();
-        match self {
-            Builtin::Add => todo!(),
-            Builtin::Sub => todo!(),
-            Builtin::Mul => todo!(),
-            Builtin::Div => todo!(),
-            Builtin::Equal => {
+        macro_rules! compare {
+            ($first: ident, $second: ident) => {
                 if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
                     assert_eq!(type_stack[len - 1].padded_size(), 4);
+                    assert_eq!(type_stack[len - 2].padded_size(), 4);
                     writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
                     writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
                     writeln!(writer, "    add rsp, 8")?;
                     writeln!(
                         writer,
                         "    comiss {}, {}",
-                        FloatRegister::Xmm0,
-                        FloatRegister::Xmm1,
+                        compare!(@f $first),
+                        compare!(@f $second),
                     )?;
                 } else {
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
                     assert!(type_stack[len - 1].is_integer());
                     writeln!(writer, "    popq rax")?;
                     writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp rbx, rax")?;
+                    writeln!(writer, "    cmp {}, {}", compare!(@n $first), compare!(@n $second))?;
                 }
+            };
+            (@f a) => { FloatRegister::Xmm0 };
+            (@f b) => { FloatRegister::Xmm1 };
+            (@n a) => { "rax" };
+            (@n b) => { "rbx" };
+        }
+        match self {
+            Builtin::Add => todo!(),
+            Builtin::Sub => todo!(),
+            Builtin::Mul => todo!(),
+            Builtin::Div => todo!(),
+            Builtin::Mod => todo!(),
+            Builtin::Equal => {
+                compare!(a, b);
                 writeln!(writer, "    sete al")?;
                 writeln!(writer, "    movzx rax, al")?;
                 writeln!(writer, "    push rax")?;
@@ -280,139 +290,35 @@ impl Builtin {
                 writeln!(writer, "    push rax")?;
             }
             Builtin::NotEqual => {
-                if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(
-                        writer,
-                        "    comiss {}, {}",
-                        FloatRegister::Xmm0,
-                        FloatRegister::Xmm1,
-                    )?;
-                } else {
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    assert_eq!(type_stack[len - 1].padded_size(), 8);
-                    assert!(type_stack[len - 1].is_integer());
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp rbx, rax")?;
-                }
+                compare!(a, b);
                 writeln!(writer, "    setne al")?;
                 writeln!(writer, "    movzx rax, al")?;
                 writeln!(writer, "    push rax")?;
             }
             Builtin::Lt => {
-                if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
-                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(
-                        writer,
-                        "    comiss {}, {}",
-                        FloatRegister::Xmm0,
-                        FloatRegister::Xmm1,
-                    )?;
-
-                    writeln!(writer, "    seta al")?;
-                } else {
-                    assert_eq!(type_stack[len - 1].padded_size(), 8);
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    assert!(type_stack[len - 1].is_integer());
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp rax, rbx")?;
-                }
+                compare!(a, b);
                 writeln!(writer, "    seta al")?;
                 writeln!(writer, "    movzx rax, al")?;
                 writeln!(writer, "    push rax")?;
             }
             Builtin::Lte => {
-                if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
-                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(
-                        writer,
-                        "    comiss {}, {}",
-                        FloatRegister::Xmm0,
-                        FloatRegister::Xmm1,
-                    )?;
-
-                    writeln!(writer, "    seta al")?;
-                } else {
-                    assert_eq!(type_stack[len - 1].padded_size(), 8);
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    assert!(type_stack[len - 1].is_integer());
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp rax, rbx")?;
-                }
+                compare!(a, b);
                 writeln!(writer, "    setnb al")?;
                 writeln!(writer, "    movzx rax, al")?;
                 writeln!(writer, "    push rax")?;
             }
             Builtin::Gt => {
-                if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
-                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(
-                        writer,
-                        "    comiss {}, {}",
-                        FloatRegister::Xmm1,
-                        FloatRegister::Xmm0,
-                    )?;
-
-                    writeln!(writer, "    seta al")?;
-                } else {
-                    assert_eq!(type_stack[len - 1].padded_size(), 8);
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    assert!(type_stack[len - 1].is_integer());
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp rbx, rax")?;
-                }
+                compare!(b, a);
                 writeln!(writer, "    seta al")?;
                 writeln!(writer, "    movzx rax, al")?;
                 writeln!(writer, "    push rax")?;
             }
             Builtin::Gte => {
-                if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
-                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(
-                        writer,
-                        "    comiss {}, {}",
-                        FloatRegister::Xmm1,
-                        FloatRegister::Xmm0,
-                    )?;
-
-                    writeln!(writer, "    seta al")?;
-                } else {
-                    assert_eq!(type_stack[len - 1].padded_size(), 8);
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    assert!(type_stack[len - 1].is_integer());
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp rbx, rax")?;
-                }
+                compare!(b, a);
                 writeln!(writer, "    setnb al")?;
                 writeln!(writer, "    movzx rax, al")?;
                 writeln!(writer, "    push rax")?;
             }
-            Builtin::Mod => todo!(),
             Builtin::Dup => {
                 // TODO: move values bigger than registers
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
