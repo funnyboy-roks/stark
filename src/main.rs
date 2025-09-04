@@ -4,9 +4,12 @@ use clap::Parser;
 use lex::Lexer;
 use miette::NamedSource;
 
+use crate::ir::Module;
+
 pub mod cli;
 pub mod compile;
 // pub mod eval;
+pub mod codegen;
 pub mod hash_float;
 pub mod ir;
 pub mod lex;
@@ -47,7 +50,34 @@ fn main() -> Result<(), miette::Error> {
                 content.to_string(),
             ))
         })?;
-        ir::process(&cli, ast).map_err(|e| {
+        let mut module = Module::new(ast);
+        module.compile_module().map_err(|e| {
+            miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            ))
+        })?;
+    } else if cli.codegen {
+        eprintln!("generating ir...");
+        let parser = parse::Parser::new(lex);
+        let ast = parser.parse().map_err(|e| {
+            miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            ))
+        })?;
+        let mut module = Module::new(ast);
+        module.compile_module().map_err(|e| {
+            miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            ))
+        })?;
+
+        eprintln!();
+        eprintln!("generating code...");
+        let mut codegen = codegen::CodeGen::new(module, std::io::stdout());
+        codegen.compile().map_err(|e| {
             miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
                 content.to_string(),

@@ -67,13 +67,29 @@ pub enum TokenKind {
     BoolLit,
 
     // Ops
+    /// +
     Plus,
+    /// -
     Minus,
+    /// *
     Asterisk,
+    /// /
     Slash,
+    /// =
     Equal,
+    /// !
     Not,
+    /// !=
+    Neq,
+    /// <
     Lt,
+    /// <=
+    Lte,
+    /// >
+    Gt,
+    /// >=
+    Gte,
+    /// %
     Percent,
 
     // Symbols
@@ -119,7 +135,11 @@ pub enum TokenValue {
     Slash,
     Equal,
     Not,
+    Neq,
     Lt,
+    Lte,
+    Gt,
+    Gte,
     Percent,
 
     // Symbols
@@ -169,7 +189,11 @@ impl TokenValue {
             TokenValue::Slash => TokenKind::Slash,
             TokenValue::Equal => TokenKind::Equal,
             TokenValue::Not => TokenKind::Not,
+            TokenValue::Neq => TokenKind::Neq,
             TokenValue::Lt => TokenKind::Lt,
+            TokenValue::Lte => TokenKind::Lte,
+            TokenValue::Gt => TokenKind::Gt,
+            TokenValue::Gte => TokenKind::Gte,
             TokenValue::Percent => TokenKind::Percent,
             TokenValue::Ellipsis => TokenKind::Ellipsis,
             TokenValue::Arrow => TokenKind::Arrow,
@@ -630,6 +654,14 @@ impl Iterator for Lexer<'_> {
                         TokenValue::Equal,
                     )));
                 }
+                ('!', Some('=')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Neq,
+                    )));
+                }
                 ('!', _) => {
                     self.offset += 1;
                     return Some(Ok(Token::new(
@@ -638,12 +670,36 @@ impl Iterator for Lexer<'_> {
                         TokenValue::Not,
                     )));
                 }
+                ('<', Some('=')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Lte,
+                    )));
+                }
                 ('<', _) => {
                     self.offset += 1;
                     return Some(Ok(Token::new(
                         start..self.offset,
                         self.file,
                         TokenValue::Lt,
+                    )));
+                }
+                ('>', Some('=')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Gte,
+                    )));
+                }
+                ('>', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Gt,
                     )));
                 }
                 ('%', _) => {

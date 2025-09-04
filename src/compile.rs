@@ -988,7 +988,6 @@ where
                 Type::Bool.push(&mut self.out, if *n { 1 } else { 0 })?;
                 self.type_stack.push(Type::Bool);
             }
-            // TODO: Fat pointers
             AtomKind::StrLit(s) => {
                 let label = self.data.add_bytes(s.as_bytes().into());
                 self.type_stack.push(Type::FatPointer);
@@ -1188,6 +1187,10 @@ where
                     });
                 }
             }
+            AtomKind::Neq => todo!(),
+            AtomKind::Lte => todo!(),
+            AtomKind::Gt => todo!(),
+            AtomKind::Gte => todo!(),
         }
         Ok(())
     }

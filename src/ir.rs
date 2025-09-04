@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     ffi::CString,
     fmt::{Debug, Display},
-    io::Repeat,
     ops::{Deref, DerefMut},
 };
 
@@ -10,7 +9,6 @@ use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
 use crate::{
-    cli::Cli,
     lex::NumLitVal,
     parse::{combine_span, Ast, AtomKind, Ident, Spanned, TypeAtom},
 };
@@ -102,6 +100,7 @@ pub enum Type {
     Bool,
 }
 
+#[macro_export]
 macro_rules! ty {
     (*$($tt:tt)+) => {
         Type::Pointer(Box::new(ty!($($tt)+)))
@@ -122,7 +121,7 @@ macro_rules! ty {
 }
 
 impl Type {
-    fn from_atom(atom: &TypeAtom) -> Option<Type> {
+    pub fn from_atom(atom: &TypeAtom) -> Option<Type> {
         match atom {
             TypeAtom::Ident(ident) => {
                 match &**ident {
@@ -154,14 +153,29 @@ impl Type {
             Type::I16 | Type::U16 => 2,
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::Integer | Type::Float => panic!("{} is a placeholder and has no size", self),
+            Type::Integer | Type::Float => 8, // assume [uif]64
+            Type::Pointer(_) => 8,            // TODO: platform pointer size
+            Type::FatPointer => todo!("fat pointer size"),
+            Type::Struct => todo!("structs"),
+        }
+    }
+
+    /// Return size (in bytes) of this type after being padded to 8 bytes
+    pub fn padded_size(&self) -> u32 {
+        match self {
+            Type::I8 | Type::U8 | Type::Bool => 8,
+            Type::I16 | Type::U16 => 8,
+            Type::I32 | Type::U32 => 8,
+            Type::F32 | Type::Float => 4, // TODO: Confirm
+            Type::I64 | Type::U64 | Type::F64 => 8,
+            Type::Integer => 8,    // assume [ui]64
             Type::Pointer(_) => 8, // TODO: platform pointer size
             Type::FatPointer => todo!("fat pointer size"),
             Type::Struct => todo!("structs"),
         }
     }
 
-    fn is_integer(&self) -> bool {
+    pub fn is_integer(&self) -> bool {
         match self {
             Type::I8
             | Type::I16
@@ -179,7 +193,7 @@ impl Type {
         }
     }
 
-    fn is_float(&self) -> bool {
+    pub fn is_float(&self) -> bool {
         match self {
             Type::F32 | Type::F64 | Type::Float => true,
             Type::I8
@@ -199,7 +213,7 @@ impl Type {
     }
 
     /// Type has not yet been resolved (Type::Integer or Type::Float)
-    fn is_unresolved(&self) -> bool {
+    pub fn is_unresolved(&self) -> bool {
         match self {
             Type::Integer | Type::Float => true,
             Type::I8
@@ -219,7 +233,7 @@ impl Type {
         }
     }
     /// self == other
-    fn equal(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn equal(&self, other: &Type) -> Option<Vec<Self>> {
         if self == other {
             return Some(vec![ty!(bool)]);
         }
@@ -263,7 +277,7 @@ impl Type {
     }
 
     /// self {<,>,<=,>=} other
-    fn ord_cmp(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn ord_cmp(&self, other: &Type) -> Option<Vec<Self>> {
         if self == other {
             return Some(vec![ty!(bool)]);
         }
@@ -307,7 +321,7 @@ impl Type {
     }
 
     /// self % other
-    fn modulo(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn modulo(&self, other: &Type) -> Option<Vec<Self>> {
         if self.is_integer() && self == other || *self == Type::Integer && other.is_integer() {
             return Some(vec![self.clone()]);
         }
@@ -336,7 +350,7 @@ impl Type {
     }
 
     /// self + other
-    fn add(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn add(&self, other: &Type) -> Option<Vec<Self>> {
         match self {
             Type::I8
             | Type::I16
@@ -405,7 +419,7 @@ impl Type {
     }
 
     /// self - other
-    fn sub(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn sub(&self, other: &Type) -> Option<Vec<Self>> {
         match self {
             Type::I8
             | Type::I16
@@ -474,7 +488,7 @@ impl Type {
     }
 
     /// self / other
-    fn div(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn div(&self, other: &Type) -> Option<Vec<Self>> {
         match self {
             Type::I8
             | Type::I16
@@ -526,7 +540,7 @@ impl Type {
     }
 
     /// self * other
-    fn mul(&self, other: &Type) -> Option<Vec<Self>> {
+    pub fn mul(&self, other: &Type) -> Option<Vec<Self>> {
         match self {
             Type::I8
             | Type::I16
@@ -579,7 +593,7 @@ impl Type {
         }
     }
 
-    fn matches(&self, expected: &Type) -> bool {
+    pub fn matches(&self, expected: &Type) -> bool {
         if self == expected {
             return true;
         }
@@ -602,7 +616,7 @@ impl Type {
         }
     }
 
-    fn cast_into(&self, span: SourceSpan, target: &Self) -> Result<(), IrGenError> {
+    pub fn cast_into(&self, span: SourceSpan, target: &Self) -> Result<(), IrGenError> {
         if self == target {
             return Ok(());
         }
@@ -662,19 +676,6 @@ impl Display for Type {
     }
 }
 
-pub enum ArgumentDest {
-    Register,
-    Stack,
-    FloatRegister,
-}
-
-impl Type {
-    /// Where this type should go for an argument to a function
-    pub fn argument_dest() -> ArgumentDest {
-        todo!()
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Builtin {
     Add,
@@ -683,7 +684,11 @@ pub enum Builtin {
     Div,
     Equal,
     Not,
+    NotEqual,
     Lt,
+    Lte,
+    Gt,
+    Gte,
     Mod,
     Dup,
     Dup2,
@@ -692,7 +697,7 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    fn type_check(
+    pub fn type_check(
         self,
         span: SourceSpan,
         type_stack: &[Type],
@@ -761,7 +766,47 @@ impl Builtin {
                     })
                 }
             }
+            Builtin::NotEqual => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.equal(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot compare {} to {}", b, a),
+                })?;
+                Ok((2, returns))
+            }
             Builtin::Lt => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.ord_cmp(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot compare {} and {}", a, b),
+                })?;
+                Ok((2, returns))
+            }
+            Builtin::Lte => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.ord_cmp(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot compare {} and {}", a, b),
+                })?;
+                Ok((2, returns))
+            }
+            Builtin::Gt => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.ord_cmp(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot compare {} and {}", a, b),
+                })?;
+                Ok((2, returns))
+            }
+            Builtin::Gte => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
                     .ok_or(IrGenError::StackUnderflow { span })?;
@@ -808,7 +853,7 @@ impl Builtin {
         }
     }
 
-    fn apply(
+    pub fn apply(
         self,
         current: Ir,
         ir_stack: &mut Vec<Ir>,
@@ -903,8 +948,22 @@ impl Builtin {
                 };
                 Ok(())
             }
-            Builtin::Not => todo!(),
+            Builtin::Not => {
+                let b_ir = ir_stack.pop().unwrap();
+                let IrKind::PushBool(b) = b_ir.kind else {
+                    panic!("checked by caller")
+                };
+                ir_stack.push(Ir::new_spans(
+                    [current.span, b_ir.span],
+                    IrKind::PushBool(!b),
+                ));
+                Ok(())
+            }
+            Builtin::NotEqual => todo!(),
             Builtin::Lt => todo!(),
+            Builtin::Lte => todo!(),
+            Builtin::Gt => todo!(),
+            Builtin::Gte => todo!(),
             Builtin::Mod => todo!(),
             Builtin::Dup => {
                 ir_stack.extend_from_within(ir_stack.len() - 1..);
@@ -1049,8 +1108,8 @@ impl IrKind {
 
 #[derive(Debug, Clone)]
 pub struct Ir {
-    span: SourceSpan,
-    kind: IrKind,
+    pub span: SourceSpan,
+    pub kind: IrKind,
 }
 
 impl Ir {
@@ -1069,6 +1128,7 @@ impl Ir {
 /// Function that has been converted into IR
 #[derive(Debug)]
 pub struct ConvertedFunction {
+    pub name: String,
     pub linker_name: String,
     pub body: Vec<Ir>,
 }
@@ -1211,7 +1271,7 @@ impl TypeStack {
         }
     }
 
-    fn matches(&self, expected: &TypeStack) -> bool {
+    pub fn matches(&self, expected: &TypeStack) -> bool {
         self.len() == expected.len()
             && self
                 .iter()
@@ -1248,12 +1308,12 @@ impl DerefMut for TypeStack {
 
 // TODO: names are very hard
 #[derive(Debug, Default)]
-struct Module {
+pub struct Module {
     /// The ASTs for the module
     asts: Vec<Ast>,
 
-    functions: HashMap<String, FunctionSignature>,
-    converted_functions: Vec<ConvertedFunction>,
+    pub functions: HashMap<String, FunctionSignature>,
+    pub converted_functions: Vec<ConvertedFunction>,
 }
 
 impl Module {
@@ -1265,7 +1325,7 @@ impl Module {
         }
     }
 
-    fn compile_module(&mut self) -> Result<(), IrGenError> {
+    pub fn compile_module(&mut self) -> Result<(), IrGenError> {
         self.scan_functions()?;
         for ast in std::mem::take(&mut self.asts) {
             self.module_ast(ast)?;
@@ -1418,7 +1478,11 @@ impl Module {
                 AtomKind::Slash => builtin!(atom, Div),
                 AtomKind::Equal => builtin!(atom, Equal),
                 AtomKind::Not => builtin!(atom, Not),
+                AtomKind::Neq => builtin!(atom, NotEqual),
                 AtomKind::Lt => builtin!(atom, Lt),
+                AtomKind::Lte => builtin!(atom, Lte),
+                AtomKind::Gt => builtin!(atom, Gt),
+                AtomKind::Gte => builtin!(atom, Gte),
                 AtomKind::Percent => builtin!(atom, Mod),
                 AtomKind::Dup => builtin!(atom, Dup),
                 AtomKind::Dup2 => builtin!(atom, Dup2),
@@ -1587,7 +1651,8 @@ impl Module {
                 assert!(optimised_type_stack.matches(&body_type_stack));
 
                 let converted = ConvertedFunction {
-                    linker_name: f.name,
+                    name: f.name.clone(),
+                    linker_name: f.name, // TODO: user-defined linker symbols
                     body: ir,
                 };
                 self.converted_functions.push(converted);
@@ -1615,23 +1680,6 @@ impl Module {
 
         Ok(out)
     }
-}
-
-pub fn process(_cli: &Cli, asts: Vec<Ast>) -> Result<(), IrGenError> {
-    let mut module = Module::new(asts);
-    module.compile_module()?;
-    eprintln!("Function Signatures:");
-    for x in &module.functions {
-        eprintln!("    {}", x.1);
-    }
-    eprintln!("Functions:");
-    for x in &module.converted_functions {
-        eprintln!("    {}:", x.linker_name);
-        for y in &x.body {
-            eprintln!("        {:?}", y.kind);
-        }
-    }
-    Ok(())
 }
 
 pub fn update_stacks(

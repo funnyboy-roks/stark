@@ -10,6 +10,13 @@ pub struct Cli {
     pub lex: bool,
     #[clap(short, long, conflicts_with = "lex", conflicts_with = "parse")]
     pub ir: bool,
+    #[clap(
+        short = 'g',
+        long = "gen",
+        conflicts_with = "lex",
+        conflicts_with = "parse"
+    )]
+    pub codegen: bool,
 
     #[clap(long)]
     pub auto_drop: bool,

@@ -11,15 +11,15 @@ build() {
     asm="$1.s"
     obj="$1.o"
 
-    cargo r -q -- -o "$asm" "$1.st"
+    cargo r -q -- --gen "$1.st" > "$asm"
     fasm "$asm" "$obj"
     gcc -no-pie -o "$1" "$obj"
 }
 
 run() {
     name=$(basename $1)
-    stdout=$(mktemp stark-test-$name-stdout.XXXXXXXXXX)
-    stderr=$(mktemp stark-test-$name-stderr.XXXXXXXXXX)
+    stdout=$(mktemp stark-test-$name-stdout.XXXXXXXXXX -t)
+    stderr=$(mktemp stark-test-$name-stderr.XXXXXXXXXX -t)
     ./$1 >$stdout 2>$stderr
     # STDOUT:
     # asdf
