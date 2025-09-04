@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     ffi::CString,
     fmt::{Debug, Display},
+    io::Repeat,
     ops::{Deref, DerefMut},
 };
 
@@ -27,8 +28,6 @@ pub enum IrGenError {
         span: SourceSpan,
         message: String,
     },
-    #[error("Stack not empty at end of program execution.  Contents: {stack:?}")]
-    StackNotEmpty { stack: TypeStack },
     #[error("'{ident}' defined multiple times")]
     RepeatDefinition {
         ident: String,
@@ -46,7 +45,7 @@ pub enum IrGenError {
         span: SourceSpan,
     },
 
-    #[error("Variadic arg size is incorrect.  Expected: {expected}  Found: {actual}")]
+    #[error("Variadic arg size is incorrect.  Expected at least: {expected}  Found: {actual}")]
     #[diagnostic(help(
         "When specifying no variadic args, you may omit the arg size for the function."
     ))]
@@ -1078,6 +1077,7 @@ pub struct ConvertedFunction {
 pub struct FunctionSignature {
     pub name: String,
     pub linker_name: String,
+    pub ident_span: SourceSpan,
     pub args: TypeStack,
     pub variadic: bool,
     pub returns: TypeStack,
@@ -1086,6 +1086,21 @@ pub struct FunctionSignature {
 
 impl FunctionSignature {
     pub fn apply(&self, ident: &Ident, type_stack: &mut TypeStack) -> Result<(), IrGenError> {
+        if let Some(len) = ident.len {
+            if self.variadic && (len as usize) < self.args.len() {
+                return Err(IrGenError::IncorrectExplicitVariadicArgSize {
+                    expected: self.args.len(),
+                    actual: len as usize,
+                    span: ident.span,
+                });
+            } else if !self.variadic && self.args.len() != len as usize {
+                return Err(IrGenError::IncorrectExplicitArgSize {
+                    expected: self.args.len(),
+                    actual: len as usize,
+                    span: ident.span,
+                });
+            }
+        }
         for expected in self.args.iter() {
             // TODO: error for all args at the same time
             type_stack.pop_type(ident.span, expected)?;
@@ -1265,11 +1280,19 @@ impl Module {
                     continue
                 }
                 Ast::ExternFn(f) => {
+                    if let Some(original) = self.functions.get(&f.name) {
+                        return Err(IrGenError::RepeatDefinition {
+                            ident: f.name.clone(),
+                            original: original.ident_span,
+                            repeat: f.ident.span,
+                        });
+                    }
                     self.functions.insert(
                         f.name.clone(),
                         FunctionSignature {
                             name: f.name.clone(),
                             linker_name: f.linker_name.clone(),
+                            ident_span: f.ident.span,
                             args: f
                                 .args
                                 .iter()
@@ -1288,11 +1311,19 @@ impl Module {
                     );
                 }
                 Ast::Fn(f) => {
+                    if let Some(original) = self.functions.get(&f.name) {
+                        return Err(IrGenError::RepeatDefinition {
+                            ident: f.name.clone(),
+                            original: original.ident_span,
+                            repeat: f.ident.span,
+                        });
+                    }
                     self.functions.insert(
                         f.name.clone(),
                         FunctionSignature {
                             name: f.name.clone(),
                             linker_name: f.name.clone(), // TODO: support custom linker name
+                            ident_span: f.ident.span,
                             args: f
                                 .args
                                 .iter()
