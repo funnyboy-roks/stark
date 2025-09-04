@@ -22,6 +22,7 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "break" => TokenValue::Break,
     "true" => TokenValue::BoolLit(true),
     "false" => TokenValue::BoolLit(false),
+    "cast" => TokenValue::Cast,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,6 +89,7 @@ pub enum TokenKind {
     Drop,
     Extern,
     Fn,
+    Cast,
 
     Then,
     Else,
@@ -133,6 +135,7 @@ pub enum TokenValue {
     Drop,
     Extern,
     Fn,
+    Cast,
 
     Then,
     Else,
@@ -176,6 +179,7 @@ impl TokenValue {
             TokenValue::Drop => TokenKind::Drop,
             TokenValue::Extern => TokenKind::Extern,
             TokenValue::Fn => TokenKind::Fn,
+            TokenValue::Cast => TokenKind::Cast,
             TokenValue::Then => TokenKind::Then,
             TokenValue::Else => TokenKind::Else,
             TokenValue::While => TokenKind::While,

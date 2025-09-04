@@ -714,6 +714,7 @@ where
                 Ast::Fn(f) => Some((f.name.clone(), f.clone())),
                 Ast::Then(_) => None,
                 Ast::While(_) => None,
+                Ast::Cast(_) => None,
             })
             .collect();
 
@@ -817,6 +818,7 @@ where
                 }
                 Ast::Then(_) => {}
                 Ast::While(_) => {}
+                Ast::Cast(_) => {}
             }
         }
 
@@ -1327,6 +1329,7 @@ where
                 Ast::Fn(_) => continue,
                 Ast::Then(t) => self.compile_then(t)?,
                 Ast::While(w) => self.compile_while(w)?,
+                Ast::Cast(_) => todo!(),
             }
             writeln!(self.out)?;
         }

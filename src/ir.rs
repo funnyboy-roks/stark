@@ -10,16 +10,12 @@ use thiserror::Error;
 
 use crate::{
     cli::Cli,
-    lex::{LexError, NumLitVal},
-    parse::{Ast, AtomKind, Ident, TypeAtom},
+    lex::NumLitVal,
+    parse::{combine_span, Ast, AtomKind, Ident, Spanned, TypeAtom},
 };
 
 #[derive(Debug, Error, Diagnostic)]
-pub enum CompileError {
-    #[error(transparent)]
-    LexError(#[from] LexError),
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
+pub enum IrGenError {
     #[error("Stack underflow")]
     StackUnderflow {
         #[label = "because of this"]
@@ -152,6 +148,20 @@ impl Type {
         }
     }
 
+    /// Return size (in bytes) of this type
+    pub fn size(&self) -> u32 {
+        match self {
+            Type::I8 | Type::U8 | Type::Bool => 1,
+            Type::I16 | Type::U16 => 2,
+            Type::I32 | Type::U32 | Type::F32 => 4,
+            Type::I64 | Type::U64 | Type::F64 => 8,
+            Type::Integer | Type::Float => panic!("{} is a placeholder and has no size", self),
+            Type::Pointer(_) => 8, // TODO: platform pointer size
+            Type::FatPointer => todo!("fat pointer size"),
+            Type::Struct => todo!("structs"),
+        }
+    }
+
     fn is_integer(&self) -> bool {
         match self {
             Type::I8
@@ -170,6 +180,45 @@ impl Type {
         }
     }
 
+    fn is_float(&self) -> bool {
+        match self {
+            Type::F32 | Type::F64 | Type::Float => true,
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::Integer
+            | Type::Pointer(_)
+            | Type::FatPointer
+            | Type::Struct
+            | Type::Bool => false,
+        }
+    }
+
+    /// Type has not yet been resolved (Type::Integer or Type::Float)
+    fn is_unresolved(&self) -> bool {
+        match self {
+            Type::Integer | Type::Float => true,
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::F32
+            | Type::F64
+            | Type::Pointer(_)
+            | Type::FatPointer
+            | Type::Struct
+            | Type::Bool => false,
+        }
+    }
     /// self == other
     fn equal(&self, other: &Type) -> Option<Vec<Self>> {
         if self == other {
@@ -553,6 +602,42 @@ impl Type {
             Type::Bool => false,
         }
     }
+
+    fn cast_into(&self, span: SourceSpan, target: &Self) -> Result<(), IrGenError> {
+        if self == target {
+            return Ok(());
+        }
+        let valid = match self {
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::Integer => {
+                !target.is_unresolved()
+                    && (target.is_integer() || target.is_float() || *target == Type::Bool)
+            }
+            Type::Float | Type::F32 | Type::F64 => {
+                !target.is_unresolved()
+                    && (target.is_integer() || target.is_float() || *target == Type::Bool)
+            }
+            Type::Pointer(_) => matches!(target, Type::U64),
+            Type::FatPointer => todo!(),
+            Type::Struct => todo!(),
+            Type::Bool => !target.is_unresolved() && target.is_integer(),
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(IrGenError::TypeError2 {
+                span,
+                message: format!("Cannot cast {} into {}", self, target),
+            })
+        }
+    }
 }
 
 impl Display for Type {
@@ -612,13 +697,13 @@ impl Builtin {
         self,
         span: SourceSpan,
         type_stack: &[Type],
-    ) -> Result<(usize, Vec<Type>), CompileError> {
+    ) -> Result<(usize, Vec<Type>), IrGenError> {
         match self {
             Builtin::Add => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.add(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.add(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot add {} to {}", b, a),
                 })?;
@@ -627,8 +712,8 @@ impl Builtin {
             Builtin::Sub => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.sub(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.sub(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot subtract {} from {}", b, a),
                 })?;
@@ -637,8 +722,8 @@ impl Builtin {
             Builtin::Mul => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.mul(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.mul(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot multiply {} by {}", b, a),
                 })?;
@@ -647,8 +732,8 @@ impl Builtin {
             Builtin::Div => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.div(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.div(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot multiply {} by {}", b, a),
                 })?;
@@ -657,8 +742,8 @@ impl Builtin {
             Builtin::Equal => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.equal(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.equal(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot compare {} to {}", b, a),
                 })?;
@@ -667,11 +752,11 @@ impl Builtin {
             Builtin::Not => {
                 let a = type_stack
                     .last()
-                    .ok_or(CompileError::StackUnderflow { span })?;
+                    .ok_or(IrGenError::StackUnderflow { span })?;
                 if *a == Type::Bool {
                     Ok((1, vec![a.clone()]))
                 } else {
-                    Err(CompileError::TypeError2 {
+                    Err(IrGenError::TypeError2 {
                         span,
                         message: format!("Cannot negate {}", a),
                     })
@@ -680,8 +765,8 @@ impl Builtin {
             Builtin::Lt => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.ord_cmp(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.ord_cmp(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot compare {} and {}", a, b),
                 })?;
@@ -690,8 +775,8 @@ impl Builtin {
             Builtin::Mod => {
                 let [b, a] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
-                let returns = a.modulo(b).ok_or_else(|| CompileError::TypeError2 {
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.modulo(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
                     message: format!("Cannot perform module of {} by {}", a, b),
                 })?;
@@ -700,25 +785,25 @@ impl Builtin {
             Builtin::Dup => {
                 let a = type_stack
                     .last()
-                    .ok_or(CompileError::StackUnderflow { span })?;
+                    .ok_or(IrGenError::StackUnderflow { span })?;
                 Ok((1, vec![a.clone(), a.clone()]))
             }
             Builtin::Dup2 => {
                 let [a, b] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
+                    .ok_or(IrGenError::StackUnderflow { span })?;
                 Ok((2, vec![a.clone(), b.clone(), a.clone(), b.clone()]))
             }
             Builtin::Swap => {
                 let [a, b] = type_stack
                     .last_chunk::<2>()
-                    .ok_or(CompileError::StackUnderflow { span })?;
+                    .ok_or(IrGenError::StackUnderflow { span })?;
                 Ok((2, vec![b.clone(), a.clone()]))
             }
             Builtin::Drop => {
                 type_stack
                     .last()
-                    .ok_or(CompileError::StackUnderflow { span })?;
+                    .ok_or(IrGenError::StackUnderflow { span })?;
                 Ok((1, Vec::new()))
             }
         }
@@ -729,7 +814,7 @@ impl Builtin {
         current: Ir,
         ir_stack: &mut Vec<Ir>,
         type_stack: &[Type],
-    ) -> Result<(), CompileError> {
+    ) -> Result<(), IrGenError> {
         match self {
             Builtin::Add => {
                 let [a_ty, b_ty] = type_stack else {
@@ -868,6 +953,60 @@ pub struct ThenIr {
 }
 
 #[derive(Debug, Clone)]
+pub struct Cast(Type);
+
+impl Cast {
+    pub fn apply(&self, mut ir: Ir, ir_stack: &mut Vec<Ir>) -> Result<(), IrGenError> {
+        match ir.kind {
+            IrKind::PushInt(ref mut n) => {
+                if self.0.is_integer() {
+                    *n %= 2u32.pow(8 * self.0.size()) as i128;
+                    ir_stack.push(ir);
+                } else if self.0 == Type::Bool {
+                    ir_stack.push(Ir::new(ir.span, IrKind::PushBool(*n != 0)));
+                } else if self.0.is_float() {
+                    let f = *n as f64;
+                    ir_stack.push(Ir::new(ir.span, IrKind::PushFloat(f)));
+                } else {
+                    panic!()
+                }
+            }
+            IrKind::PushFloat(f) => {
+                if self.0.is_integer() {
+                    let n = f as i128 % 2u32.pow(8 * self.0.size()) as i128;
+                    ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n)));
+                } else if self.0.is_float() {
+                    // nop
+                    ir_stack.push(ir);
+                } else {
+                    panic!()
+                }
+            }
+            IrKind::PushBool(_) => {
+                assert_eq!(self.0, Type::Bool);
+                ir_stack.push(ir);
+            }
+            IrKind::PushCStr(_) => todo!(),
+            IrKind::PushStr(_) => todo!(),
+            _ => panic!("checked by compiler"),
+        }
+
+        Ok(())
+    }
+
+    pub fn type_check(
+        &self,
+        span: SourceSpan,
+        type_stack: &mut TypeStack,
+    ) -> Result<(), IrGenError> {
+        let ty = type_stack.pop(span)?;
+        ty.cast_into(span, &self.0)?;
+        type_stack.push(self.0.clone());
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum IrKind {
     /// Integer literal, to be coerced / operated on by const fns
     PushInt(i128),
@@ -890,6 +1029,7 @@ pub enum IrKind {
     While(WhileIr),
     // string is loop id
     Break(String),
+    Cast(Cast),
 }
 
 impl IrKind {
@@ -902,7 +1042,8 @@ impl IrKind {
             | IrKind::CallBuiltin(_)
             | IrKind::Then(_)
             | IrKind::While(_)
-            | IrKind::Break(_) => false,
+            | IrKind::Break(_)
+            | IrKind::Cast(_) => false,
         }
     }
 }
@@ -917,21 +1058,12 @@ impl Ir {
     fn new(span: SourceSpan, kind: IrKind) -> Self {
         Self { span, kind }
     }
+
     fn new_spans(spans: impl IntoIterator<Item = SourceSpan>, kind: IrKind) -> Self {
         Self {
-            span: Self::combine_span(spans),
+            span: combine_span(spans),
             kind,
         }
-    }
-
-    fn combine_span(spans: impl IntoIterator<Item = SourceSpan>) -> SourceSpan {
-        let mut start = 0;
-        let mut end = 0;
-        for span in spans {
-            start = start.min(span.offset());
-            end = end.max(span.offset() + span.len());
-        }
-        (start, end - start).into()
     }
 }
 
@@ -953,28 +1085,17 @@ pub struct FunctionSignature {
 }
 
 impl FunctionSignature {
-    pub fn apply(&self, ident: &Ident, type_stack: &mut TypeStack) -> Result<(), CompileError> {
-        dbg!(&type_stack);
+    pub fn apply(&self, ident: &Ident, type_stack: &mut TypeStack) -> Result<(), IrGenError> {
         for expected in self.args.iter() {
+            // TODO: error for all args at the same time
             type_stack.pop_type(ident.span, expected)?;
-            // if !actual.matches(expected) {
-            //     return Err(CompileError::TypeError2 {
-            //         span: ident.span,
-            //         message: format!(
-            //             "Type error: expected '{}' on stack, found '{}'",
-            //             expected, actual
-            //         ),
-            //     });
-            // }
         }
         if let Some(len) = ident.len
             && len as usize > self.args.len()
             && self.variadic
         {
             for _ in 0..(len as usize - self.args.len()) {
-                type_stack
-                    .pop()
-                    .ok_or(CompileError::StackUnderflow { span: ident.span })?;
+                type_stack.pop(ident.span)?;
             }
         }
         type_stack.extend_from_slice(&self.returns);
@@ -1056,21 +1177,22 @@ impl TypeStack {
         }
     }
 
-    pub fn pop_type(&mut self, span: SourceSpan, expected: &Type) -> Result<(), CompileError> {
-        if let Some(last) = self.pop() {
-            if last.matches(expected) {
-                Ok(())
-            } else {
-                Err(CompileError::TypeError2 {
-                    span,
-                    message: format!(
-                        "Type error: expected '{}' on stack, found '{}'",
-                        expected, last
-                    ),
-                })
-            }
+    pub fn pop(&mut self, span: SourceSpan) -> Result<Type, IrGenError> {
+        self.inner.pop().ok_or(IrGenError::StackUnderflow { span })
+    }
+
+    pub fn pop_type(&mut self, span: SourceSpan, expected: &Type) -> Result<(), IrGenError> {
+        let last = self.pop(span)?;
+        if last.matches(expected) {
+            Ok(())
         } else {
-            Err(CompileError::StackUnderflow { span })
+            Err(IrGenError::TypeError2 {
+                span,
+                message: format!(
+                    "Type error: expected '{}' on stack, found '{}'",
+                    expected, last
+                ),
+            })
         }
     }
 
@@ -1128,7 +1250,7 @@ impl Module {
         }
     }
 
-    fn compile_module(&mut self) -> Result<(), CompileError> {
+    fn compile_module(&mut self) -> Result<(), IrGenError> {
         self.scan_functions()?;
         for ast in std::mem::take(&mut self.asts) {
             self.module_ast(ast)?;
@@ -1136,10 +1258,12 @@ impl Module {
         Ok(())
     }
 
-    fn scan_functions(&mut self) -> Result<(), CompileError> {
+    fn scan_functions(&mut self) -> Result<(), IrGenError> {
         for ast in &self.asts {
             match ast {
-                Ast::Ident(_) | Ast::Atom(_) | Ast::Then(_) | Ast::While(_) => continue,
+                Ast::Ident(_) | Ast::Atom(_) | Ast::Then(_) | Ast::While(_) | Ast::Cast(_) => {
+                    continue
+                }
                 Ast::ExternFn(f) => {
                     self.functions.insert(
                         f.name.clone(),
@@ -1197,7 +1321,7 @@ impl Module {
         out: &mut Vec<Ir>,
         outer_loop: Option<&(String, TypeStack, SourceSpan)>,
         body: Vec<Ast>,
-    ) -> Result<(), CompileError> {
+    ) -> Result<(), IrGenError> {
         for ast in body {
             self.body_ast(type_stack, out, outer_loop, ast)?;
         }
@@ -1210,7 +1334,7 @@ impl Module {
         out: &mut Vec<Ir>,
         outer_loop: Option<&(String, TypeStack, SourceSpan)>,
         ast: Ast,
-    ) -> Result<(), CompileError> {
+    ) -> Result<(), IrGenError> {
         macro_rules! simple {
             ($span: expr, $type: expr, $kind: expr) => {{
                 type_stack.push($type);
@@ -1234,7 +1358,7 @@ impl Module {
         match ast {
             Ast::Ident(ident) => {
                 let f = self.functions.get(&ident.ident).ok_or_else(|| {
-                    CompileError::UndefinedSymbol {
+                    IrGenError::UndefinedSymbol {
                         ident: ident.ident.clone(),
                         span: ident.span,
                     }
@@ -1272,7 +1396,7 @@ impl Module {
                 AtomKind::Break => {
                     if let Some((loop_id, start_ts, body_span)) = outer_loop {
                         if !type_stack.matches(start_ts) {
-                            return Err(CompileError::StackChanged {
+                            return Err(IrGenError::StackChanged {
                                 span: *body_span,
                                 before: start_ts.clone(),
                                 after: type_stack.clone(),
@@ -1295,7 +1419,7 @@ impl Module {
 
                 // `.. then { }` should not add anything to the stack
                 if t.elze.is_none() && !before.matches(type_stack) {
-                    return Err(CompileError::StackChanged {
+                    return Err(IrGenError::StackChanged {
                         before,
                         after: type_stack.clone(),
                         span: t.body_span,
@@ -1314,7 +1438,7 @@ impl Module {
                     let mut body = Vec::with_capacity(et.body.len());
                     self.compile_body(type_stack, &mut body, outer_loop, et.body)?;
                     if !type_stack.matches(&after_then) {
-                        return Err(CompileError::StackChanged {
+                        return Err(IrGenError::StackChanged {
                             before: after_then,
                             after: type_stack.clone(),
                             span: et.then_token.span,
@@ -1331,7 +1455,7 @@ impl Module {
                     let mut body = Vec::with_capacity(elze_body.len());
                     self.compile_body(type_stack, &mut body, outer_loop, elze_body)?;
                     if !type_stack.matches(&after_then) {
-                        return Err(CompileError::StackChanged {
+                        return Err(IrGenError::StackChanged {
                             before: after_then,
                             after: type_stack.clone(),
                             span: token.span,
@@ -1367,7 +1491,7 @@ impl Module {
 
                 // After bool from condition is popped, we should have the original stack
                 if !before.matches(type_stack) {
-                    return Err(CompileError::StackChanged {
+                    return Err(IrGenError::StackChanged {
                         before,
                         after: type_stack.clone(),
                         span: w.condition_span,
@@ -1385,7 +1509,7 @@ impl Module {
 
                 // After body runs, we should have the original stack
                 if !before.matches(type_stack) {
-                    return Err(CompileError::StackChanged {
+                    return Err(IrGenError::StackChanged {
                         before,
                         after: type_stack.clone(),
                         span: w.condition_span,
@@ -1406,11 +1530,16 @@ impl Module {
                     }),
                 ));
             }
+            Ast::Cast(c) => {
+                let x = Cast(Type::from_atom(&c.target).expect("TODO: type errors"));
+                x.type_check(c.span(), type_stack)?;
+                out.push(Ir::new(c.span(), IrKind::Cast(x)));
+            }
         }
         Ok(())
     }
 
-    fn module_ast(&mut self, ast: Ast) -> Result<(), CompileError> {
+    fn module_ast(&mut self, ast: Ast) -> Result<(), IrGenError> {
         match ast {
             Ast::Ident(_) => todo!("unexpected ident"),
             Ast::Atom(_) => todo!("unexpected atom"),
@@ -1432,7 +1561,7 @@ impl Module {
                 };
                 self.converted_functions.push(converted);
                 if !body_type_stack.matches(&signature.returns) {
-                    return Err(CompileError::IncorrectStackResults {
+                    return Err(IrGenError::IncorrectStackResults {
                         expected: signature.returns,
                         actual: body_type_stack,
                         span: f.ident.span,
@@ -1441,11 +1570,12 @@ impl Module {
             }
             Ast::Then(_) => todo!(),
             Ast::While(_) => todo!(),
+            Ast::Cast(_) => todo!(),
         }
         Ok(())
     }
 
-    fn optimise(&self, ir: Vec<Ir>, type_stack: &mut TypeStack) -> Result<Vec<Ir>, CompileError> {
+    fn optimise(&self, ir: Vec<Ir>, type_stack: &mut TypeStack) -> Result<Vec<Ir>, IrGenError> {
         let mut out = Vec::with_capacity(ir.len());
 
         for ir in ir {
@@ -1456,16 +1586,9 @@ impl Module {
     }
 }
 
-pub fn process(_cli: &Cli, asts: Vec<Ast>) -> Result<(), CompileError> {
+pub fn process(_cli: &Cli, asts: Vec<Ast>) -> Result<(), IrGenError> {
     let mut module = Module::new(asts);
     module.compile_module()?;
-    eprintln!(
-        "[{}:{}:{}] maker.functions = {:?}",
-        file!(),
-        line!(),
-        column!(),
-        module.functions,
-    );
     eprintln!("Function Signatures:");
     for x in &module.functions {
         eprintln!("    {}", x.1);
@@ -1485,7 +1608,7 @@ pub fn update_stacks(
     mut ir: Ir,
     ir_stack: &mut Vec<Ir>,
     type_stack: &mut TypeStack,
-) -> Result<(), CompileError> {
+) -> Result<(), IrGenError> {
     match ir.kind {
         IrKind::PushInt(_) => {
             ir_stack.push(ir);
@@ -1510,7 +1633,7 @@ pub fn update_stacks(
         IrKind::CallFn(ref ident) => {
             let f = functions
                 .get(&ident.ident)
-                .ok_or_else(|| CompileError::UndefinedSymbol {
+                .ok_or_else(|| IrGenError::UndefinedSymbol {
                     ident: ident.ident.clone(),
                     span: ir.span,
                 })?;
@@ -1584,7 +1707,7 @@ pub fn update_stacks(
                         update_stacks(functions, x, &mut body_ir, &mut after_body)?;
                     }
                     if !after_then.matches(&after_body) {
-                        return Err(CompileError::IncorrectStackResults {
+                        return Err(IrGenError::IncorrectStackResults {
                             expected: after_then,
                             actual: after_body,
                             span: ir.span,
@@ -1600,7 +1723,7 @@ pub fn update_stacks(
                         update_stacks(functions, x, &mut body_ir, &mut after_body)?;
                     }
                     if !after_then.matches(&after_body) {
-                        return Err(CompileError::IncorrectStackResults {
+                        return Err(IrGenError::IncorrectStackResults {
                             expected: after_then,
                             actual: after_body,
                             span: ir.span,
@@ -1620,6 +1743,15 @@ pub fn update_stacks(
         }
         IrKind::Break(_) => {
             ir_stack.push(ir);
+        }
+        IrKind::Cast(ref c) => {
+            if let Some(ir) = ir_stack.pop_if(|x| x.kind.is_const()) {
+                c.type_check(ir.span, type_stack)?;
+                c.apply(ir, ir_stack)?;
+            } else {
+                c.type_check(ir.span, type_stack)?;
+                ir_stack.push(ir);
+            }
         }
     }
     Ok(())

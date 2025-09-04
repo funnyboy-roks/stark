@@ -5,11 +5,31 @@ use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, NumLit, NumLitVal, Token, TokenKind, TokenValue};
 
+pub fn combine_span(spans: impl IntoIterator<Item = SourceSpan>) -> SourceSpan {
+    let mut start = usize::MAX;
+    let mut end = 0;
+    for span in spans {
+        start = start.min(span.offset());
+        end = end.max(span.offset() + span.len());
+    }
+    (start, end - start).into()
+}
+
+pub trait Spanned {
+    fn span(&self) -> SourceSpan;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
     pub ident: String,
     pub len: Option<u32>,
     pub span: SourceSpan,
+}
+
+impl Spanned for Ident {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +45,6 @@ pub enum AtomKind {
     CStrLit(CString),
     BoolLit(bool),
     Type(TypeAtom),
-    // FloatLit(i64), // TODO
 
     // Ops
     Plus,
@@ -76,6 +95,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Drop => Ok(Self::Drop),
             TokenValue::Extern => Err(()),
             TokenValue::Fn => Err(()),
+            TokenValue::Cast => Err(()),
             TokenValue::Then => Err(()),
             TokenValue::Else => Err(()),
             TokenValue::While => Err(()),
@@ -88,6 +108,12 @@ impl TryFrom<TokenValue> for AtomKind {
 pub struct Atom {
     pub token: Token,
     pub kind: AtomKind,
+}
+
+impl Spanned for Atom {
+    fn span(&self) -> SourceSpan {
+        self.token.span
+    }
 }
 
 impl TryFrom<Token> for Atom {
@@ -110,6 +136,12 @@ pub struct ExternFn {
     pub returns: Vec<TypeAtom>,
 }
 
+impl Spanned for ExternFn {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fn {
     pub name: String,
@@ -121,12 +153,24 @@ pub struct Fn {
     pub body: Vec<Ast>,
 }
 
+impl Spanned for Fn {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ElseThen {
     pub else_token: Token,
     pub then_token: Token,
     pub condition: Vec<Ast>,
     pub body: Vec<Ast>,
+}
+
+impl Spanned for ElseThen {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
 }
 
 /// ```stark
@@ -141,6 +185,12 @@ pub struct Then {
     pub elze: Option<(Vec<Ast>, Token)>,
 }
 
+impl Spanned for Then {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
+}
+
 /// ```stark
 /// ... while x y z { }
 /// ```
@@ -153,11 +203,39 @@ pub struct While {
     pub body_span: SourceSpan,
 }
 
-impl While {
-    pub fn span(&self) -> SourceSpan {
+impl Spanned for While {
+    fn span(&self) -> SourceSpan {
         let start = self.while_token.span.offset();
         let end = self.body_span.offset() + self.body_span.len();
         (start, end - start).into()
+    }
+}
+
+/// ```stark
+/// ... cast(*u8) ...
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cast {
+    /// ```stark
+    /// ... cast(*u8) ...
+    ///     ^^^^^^^^^
+    /// ```
+    span: SourceSpan,
+    /// ```stark
+    /// ... cast(*u8) ...
+    ///          ^^^
+    /// ```
+    pub target_span: SourceSpan,
+    /// ```stark
+    /// ... cast(*u8) ...
+    ///          ^^^
+    /// ```
+    pub target: TypeAtom,
+}
+
+impl Spanned for Cast {
+    fn span(&self) -> SourceSpan {
+        self.span
     }
 }
 
@@ -170,17 +248,19 @@ pub enum Ast {
     Fn(Fn),
     Then(Then),
     While(While),
+    Cast(Cast),
 }
 
-impl Ast {
-    pub fn span(&self) -> SourceSpan {
+impl Spanned for Ast {
+    fn span(&self) -> SourceSpan {
         match self {
-            Ast::Ident(ident) => ident.span,
-            Ast::Atom(atom) => atom.token.span,
-            Ast::ExternFn(_) => todo!(),
-            Ast::Fn(_) => todo!(),
-            Ast::Then(_) => todo!(),
+            Ast::Ident(i) => i.span(),
+            Ast::Atom(a) => a.span(),
+            Ast::ExternFn(f) => f.span(),
+            Ast::Fn(f) => f.span(),
+            Ast::Then(t) => t.span(),
             Ast::While(w) => w.span(),
+            Ast::Cast(c) => c.span(),
         }
     }
 }
@@ -323,7 +403,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_type(&mut self) -> Result<TypeAtom, ParseError> {
+    fn take_type(&mut self) -> Result<(TypeAtom, SourceSpan), ParseError> {
         let Some(token) = self.tokens.next() else {
             return Err(ParseError::UnexpectedEof {
                 expected: "type".into(),
@@ -334,10 +414,11 @@ impl<'a> Parser<'a> {
         let token = token?;
         match token.value {
             TokenValue::Asterisk => {
-                let inner = self.take_type()?;
-                Ok(TypeAtom::Pointer(Box::new(inner)))
+                let (inner, span) = self.take_type()?;
+                let span = combine_span([token.span, span]);
+                Ok((TypeAtom::Pointer(Box::new(inner)), span))
             }
-            TokenValue::Ident(ident) => Ok(TypeAtom::Ident(ident)),
+            TokenValue::Ident(ident) => Ok((TypeAtom::Ident(ident), token.span)),
             _ => {
                 return Err(ParseError::unexpected_token(
                     token,
@@ -357,7 +438,7 @@ impl<'a> Parser<'a> {
                     args.push(TypeAtom::Ident(ident));
                 }
                 TokenValue::Asterisk => {
-                    let ty = self.take_type()?;
+                    let (ty, _) = self.take_type()?;
                     args.push(TypeAtom::Pointer(Box::new(ty)));
                 }
                 TokenValue::RParen => {
@@ -584,6 +665,9 @@ impl<'a> Parser<'a> {
                 TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Extern => Err(ParseError::NestedFunction { span: token.span })?,
                 TokenValue::Fn => Err(ParseError::NestedFunction { span: token.span })?,
+                TokenValue::Cast => {
+                    out.push(Ast::Cast(self.take_cast(token)?));
+                }
                 TokenValue::Then => {
                     let t = self.take_then(token)?;
                     out.push(Ast::Then(t));
@@ -599,6 +683,18 @@ impl<'a> Parser<'a> {
         Err(ParseError::UnexpectedEof {
             expected: format!("{:?}", end_token),
             matching: open_token.map(|t| t.span),
+        })
+    }
+
+    fn take_cast(&mut self, cast_token: Token) -> Result<Cast, ParseError> {
+        let (group_start, _) = expect_token!(self, LParen);
+        let (target, target_span) = self.take_type()?;
+        let (group_end, _) = expect_token!(self, RParen);
+
+        Ok(Cast {
+            span: combine_span([cast_token.span, group_start.span, group_end.span]),
+            target_span,
+            target,
         })
     }
 
@@ -750,6 +846,10 @@ impl<'a> Parser<'a> {
                 TokenValue::Fn => {
                     let f = self.take_fn()?;
                     out.push(Ast::Fn(f));
+                }
+                TokenValue::Cast => {
+                    let c = self.take_cast(token)?;
+                    out.push(Ast::Cast(c));
                 }
                 TokenValue::Then => {
                     let t = self.take_then(token)?;

@@ -14,7 +14,7 @@ fn main {
 
     while WindowShouldClose ! {
         BeginDrawing
-            0xffffffff u64 ClearBackground
+            0xffffffff cast(u64) ClearBackground
             0xff3729e6 200.0 300 450 DrawCircle
         EndDrawing
     }

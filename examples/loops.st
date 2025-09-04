@@ -7,7 +7,7 @@ fn main {
         1 -
     } drop
 
-    5 while dup bool {
+    5 while dup cast(bool) {
         dup c"%ld\n" printf(2) drop
         1 -
     } drop
