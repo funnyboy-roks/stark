@@ -77,11 +77,14 @@ fn main() -> Result<(), miette::Error> {
         eprintln!();
         eprintln!("generating code...");
         let mut codegen = codegen::CodeGen::new(module, std::io::stdout());
-        codegen.compile().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
+        codegen.compile().map_err(|e| match e {
+            codegen::CodeGenError::IrGenError(e) => miette::Error::from(e).with_source_code(
+                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
+            ),
+            e => miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
                 content.to_string(),
-            ))
+            )),
         })?;
     } else {
         eprintln!("compiling...");

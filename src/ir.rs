@@ -212,6 +212,19 @@ impl Type {
         }
     }
 
+    pub fn is_signed(&self) -> bool {
+        match self {
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 => false,
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 => false,
+            Type::Integer => true, // assume true
+            Type::F32 | Type::F64 | Type::Float => true,
+            Type::Pointer(_) => false,
+            Type::FatPointer => todo!(),
+            Type::Struct => todo!(),
+            Type::Bool => false,
+        }
+    }
+
     /// Type has not yet been resolved (Type::Integer or Type::Float)
     pub fn is_unresolved(&self) -> bool {
         match self {
@@ -1005,6 +1018,7 @@ pub struct ElseThenIr {
 
 #[derive(Debug, Clone)]
 pub struct ThenIr {
+    pub then_span: SourceSpan,
     pub body: Vec<Ir>,
     pub else_thens: Vec<ElseThenIr>,
     pub elze: Vec<Ir>,
@@ -1161,7 +1175,7 @@ impl FunctionSignature {
                 });
             }
         }
-        for expected in self.args.iter() {
+        for expected in self.args.iter().rev() {
             // TODO: error for all args at the same time
             type_stack.pop_type(ident.span, expected)?;
         }
@@ -1356,6 +1370,7 @@ impl Module {
                             args: f
                                 .args
                                 .iter()
+                                .rev()
                                 .map(|t| Type::from_atom(t).expect("TODO"))
                                 .collect::<Vec<_>>()
                                 .into(),
@@ -1363,6 +1378,7 @@ impl Module {
                             returns: f
                                 .returns
                                 .iter()
+                                .rev()
                                 .map(|t| Type::from_atom(t).expect("TODO"))
                                 .collect::<Vec<_>>()
                                 .into(),
@@ -1387,6 +1403,7 @@ impl Module {
                             args: f
                                 .args
                                 .iter()
+                                .rev()
                                 .map(|t| Type::from_atom(t).expect("TODO"))
                                 .collect::<Vec<_>>()
                                 .into(),
@@ -1394,6 +1411,7 @@ impl Module {
                             returns: f
                                 .returns
                                 .iter()
+                                .rev()
                                 .map(|t| Type::from_atom(t).expect("TODO"))
                                 .collect::<Vec<_>>()
                                 .into(),
@@ -1568,6 +1586,7 @@ impl Module {
                 out.push(Ir::new(
                     t.then_token.span,
                     IrKind::Then(ThenIr {
+                        then_span: t.then_token.span,
                         body,
                         else_thens,
                         elze,

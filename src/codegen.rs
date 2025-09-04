@@ -5,9 +5,28 @@ use thiserror::Error;
 
 use crate::{
     hash_float::FloatExt,
-    ir::{Builtin, ConvertedFunction, Ir, IrGenError, IrKind, Module, Type, TypeStack},
+    ir::{Builtin, ConvertedFunction, Ir, IrGenError, IrKind, Module, ThenIr, Type, TypeStack},
     parse::Ident,
     ty,
+};
+
+const FASM_SYMBOLS: phf::Set<&'static str> = phf::phf_set! {
+    "and", "area", "arrange", "as", "assemble", "assert", "at", "bappend", "binary", "break",
+    "bsf", "bsr", "bswap", "byte", "call", "calminstruction", "check", "combinelines", "compute",
+    "db", "dbx", "dd", "ddq", "ddqq", "define", "defined", "definite", "display", "dp", "dq",
+    "dqq", "dqqword", "dqword", "dt", "dup", "dw", "dword", "element", "elementof", "elementsof",
+    "else", "emit", "end", "eq", "eqtype", "equ", "err", "esc", "eval", "executable", "exit",
+    "expression", "__file__", "file", "float", "format", "from", "fword", "if", "include", "indx",
+    "irp", "irpv", "isolatelines", "iterate", "jno", "jump", "jyes", "label", "lengthof",
+    "__line__", "load", "local", "macro", "match", "metadata", "metadataof", "mod", "mvmacro",
+    "mvstruc", "name", "namespace", "not", "number", "or", "org", "outscope", "postpone",
+    "priorequ", "priormacro", "priorstruc", "publish", "purge", "pword", "qqword", "quoted",
+    "qword", "rawmatch", "rb", "rd", "rdq", "rdqq", "redefine", "reequ", "relativeto",
+    "removecomments", "repeat", "rept", "restartout", "restore", "restruc", "retaincomments",
+    "rmatch", "rp", "rq", "rqq", "rt", "rw", "scale", "scaleof", "section", "shl", "shr", "sizeof",
+    "__source__", "store", "string", "stringify", "struc", "take", "taketext", "tbyte", "__time__",
+    "transform", "trunc", "tword", "used", "virtual", "while", "word", "xor", "xword", "yword",
+    "zword"
 };
 
 /// Docs from https://wiki.osdev.org/CPU_Registers_x86-64#General_Purpose_Registers
@@ -271,9 +290,92 @@ impl Builtin {
             (@n b) => { "rbx" };
         }
         match self {
-            Builtin::Add => todo!(),
-            Builtin::Sub => todo!(),
-            Builtin::Mul => todo!(),
+            Builtin::Add => {
+                if type_stack[len - 1].is_float() {
+                    assert_eq!(type_stack[len - 1].padded_size(), 4);
+                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    // equiv to:
+                    //     movss xmm0, [rsp]
+                    //     movss xmm1, [rsp+4]
+                    //     add rsp, 8
+                    //     addss xmm1, xmm0
+                    //     sub rsp, 4
+                    //     movss [rsp], xmm1
+                    writeln!(writer, "    movss xmm0, [rsp]")?;
+                    writeln!(writer, "    add rsp, 4")?;
+                    writeln!(writer, "    addss xmm0, [rsp]")?;
+                    writeln!(writer, "    movss [rsp], xmm0")?;
+                } else {
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
+                    assert!(type_stack[len - 1].is_integer());
+                    // equiv to:
+                    //     popq rbx
+                    //     popq rax
+                    //     add rax, rbx
+                    //     push rax
+                    writeln!(writer, "    popq rax")?;
+                    writeln!(writer, "    add [rsp], rax")?;
+                }
+            }
+            Builtin::Sub => {
+                if type_stack[len - 1].is_float() {
+                    assert_eq!(type_stack[len - 1].padded_size(), 4);
+                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    // equiv to:
+                    //     movss xmm0, [rsp]
+                    //     movss xmm1, [rsp+4]
+                    //     add rsp, 8
+                    //     subss xmm1, xmm0
+                    //     sub rsp, 4
+                    //     movss [rsp], xmm1
+                    writeln!(writer, "    movss xmm1, [rsp+4]")?;
+                    writeln!(writer, "    subss xmm1, [rsp]")?;
+                    writeln!(writer, "    add rsp, 4")?;
+                    writeln!(writer, "    movss [rsp], xmm1")?;
+                } else {
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
+                    assert!(type_stack[len - 1].is_integer());
+                    writeln!(writer, "    popq rax")?;
+                    writeln!(writer, "    sub [rsp], rax")?;
+                }
+            }
+            Builtin::Mul => {
+                let ty = &type_stack[len - 1];
+                if ty.is_float() {
+                    assert_eq!(type_stack[len - 1].padded_size(), 4);
+                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    // equiv to:
+                    //     movss xmm0, [rsp]
+                    //     movss xmm1, [rsp+4]
+                    //     add rsp, 8
+                    //     mulss xmm1, xmm0
+                    //     sub rsp, 4
+                    //     movss [rsp], xmm1
+                    // writeln!(writer, "    movss xmm1, [rsp+4]")?;
+                    // writeln!(writer, "    mulss xmm1, [rsp]")?;
+                    // writeln!(writer, "    add rsp, 4")?;
+                    // writeln!(writer, "    movss [rsp], xmm1")?;
+                    writeln!(writer, "    movss xmm0, [rsp]")?;
+                    writeln!(writer, "    add rsp, 4")?;
+                    writeln!(writer, "    mulss xmm0, [rsp]")?;
+                    writeln!(writer, "    movss [rsp], xmm0")?;
+                } else {
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
+                    assert!(type_stack[len - 1].is_integer());
+                    writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                    writeln!(writer, "    popq {}", Register::Rbx.for_size(ty.size()))?;
+                    writeln!(
+                        writer,
+                        "    {} {}",
+                        if ty.is_signed() { "imul" } else { "mul" },
+                        Register::Rbx.for_size(ty.size())
+                    )?;
+                    writeln!(writer, "    push {}", Register::Rax.for_size(ty.size()))?;
+                }
+            }
             Builtin::Div => todo!(),
             Builtin::Mod => todo!(),
             Builtin::Equal => {
@@ -422,6 +524,9 @@ impl<W: Write> CodeGen<W> {
         writeln!(self.writer)?;
 
         for f in converted_functions.extract_if(.., |f| f.linker_name != "main") {
+            self.type_stack.clear();
+            self.type_stack
+                .extend_from_slice(&self.module.functions[&f.name].args);
             self.compile_function(f, false)?;
         }
 
@@ -475,15 +580,18 @@ impl<W: Write> CodeGen<W> {
         self.type_stack.clear();
         self.type_stack.extend_from_slice(&func.args);
 
-        writeln!(self.writer, "{}:", f.linker_name)?;
+        if FASM_SYMBOLS.contains(&f.linker_name) {
+            writeln!(self.writer, "_{}:", f.linker_name)?;
+        } else {
+            writeln!(self.writer, "{}:", f.linker_name)?;
+        }
+
         if is_main {
             writeln!(self.writer, "    push rbp")?;
             writeln!(self.writer, "    mov rbp, rsp")?;
         }
 
-        for ir in f.body {
-            self.compile_ir(ir)?;
-        }
+        self.compile_body(f.body)?;
 
         if is_main {
             writeln!(self.writer, "    mov rax, 0")?;
@@ -493,6 +601,13 @@ impl<W: Write> CodeGen<W> {
         writeln!(self.writer, "    ret")?;
         writeln!(self.writer)?;
 
+        Ok(())
+    }
+
+    fn compile_body(&mut self, body: Vec<Ir>) -> Result<(), CodeGenError> {
+        for ir in body {
+            self.compile_ir(ir)?;
+        }
         Ok(())
     }
 
@@ -536,7 +651,9 @@ impl<W: Write> CodeGen<W> {
                 self.type_stack.truncate(len - consumed);
                 self.type_stack.extend_from_slice(&returns);
             }
-            IrKind::Then(_) => nyi!(ir.span, "then/else-then/else"),
+            IrKind::Then(then) => {
+                self.compile_then(then)?;
+            }
             IrKind::While(_) => nyi!(ir.span, "while loops"),
             IrKind::Break(_) => nyi!(ir.span, "break statements"),
             IrKind::Cast(_) => nyi!(ir.span, "casting"),
@@ -544,10 +661,58 @@ impl<W: Write> CodeGen<W> {
         Ok(())
     }
 
+    fn compile_then(&mut self, then: ThenIr) -> Result<(), CodeGenError> {
+        let id = then.then_span.offset();
+        self.type_stack.pop_type(then.then_span, &ty!(bool))?;
+
+        writeln!(self.writer, "    popq rax")?;
+        writeln!(self.writer, "    cmp rax, 0")?;
+        if then.elze.is_empty() {
+            writeln!(self.writer, "    je .then_end_{}", id)?;
+        } else {
+            writeln!(self.writer, "    je .else_{}_{}", id, 0)?;
+        }
+
+        let start = self.type_stack.clone();
+        self.compile_body(then.body)?;
+        let mut after_then = self.type_stack.clone();
+        writeln!(self.writer, "    jmp .then_end_{}", id)?;
+
+        let et_len = then.else_thens.len();
+        for (i, et) in then.else_thens.into_iter().enumerate() {
+            let _ = std::mem::replace(&mut self.type_stack, start.clone());
+            writeln!(self.writer, ".else_{}_{}:", id, i)?;
+            self.compile_body(et.condition)?;
+            self.type_stack.pop_type(then.then_span, &Type::Bool)?;
+            writeln!(self.writer, "    popq rax")?;
+            writeln!(self.writer, "    cmp rax, 0")?;
+
+            if i == et_len - 1 && then.elze.is_empty() {
+                writeln!(self.writer, "    je .then_end_{}", id)?;
+            } else {
+                writeln!(self.writer, "    je .else_{}_{}", id, i + 1)?;
+            }
+
+            self.compile_body(et.body)?;
+            writeln!(self.writer, "    jmp .then_end_{}", id)?;
+        }
+
+        if !then.elze.is_empty() {
+            let _ = std::mem::replace(&mut self.type_stack, start.clone());
+            writeln!(self.writer, ".else_{}_{}:", id, et_len)?;
+            self.compile_body(then.elze)?;
+        }
+        std::mem::swap(&mut self.type_stack, &mut after_then);
+        writeln!(self.writer, ".then_end_{}:", id)?;
+
+        Ok(())
+    }
+
     fn compile_function_call(&mut self, ident: Ident) -> Result<(), CodeGenError> {
         let f = &self.module.functions[&ident.ident];
 
         if f.external {
+            let mut count = 0;
             let mut register_i = 0;
             let mut float_i = 0;
             let mut argi = 0;
@@ -567,17 +732,19 @@ impl<W: Write> CodeGen<W> {
                     ArgumentDest::Register => todo!("overflow on stack"),
                     ArgumentDest::Stack => todo!("compact on the stack"),
                     ArgumentDest::FloatRegister if float_i < FloatRegister::ARG_REGS.len() => {
-                        let dest = FloatRegister::ARG_REGS[register_i];
-                        writeln!(self.writer, "    movss [rsp], {}", dest)?;
+                        let dest = FloatRegister::ARG_REGS[float_i];
+                        writeln!(self.writer, "    pxor {0}, {0}", dest)?;
+                        writeln!(self.writer, "    cvtss2sd {}, [rsp]", dest)?;
                         writeln!(self.writer, "    add rsp, 4")?;
                         float_i += 1;
                     }
                     ArgumentDest::FloatRegister => todo!("overflow on stack"),
                 }
+                count += 1;
             }
 
             self.type_stack.extend_from_slice(&f.returns);
-            writeln!(self.writer, "    mov rax, 0")?;
+            writeln!(self.writer, "    mov rax, {}", count)?;
             writeln!(self.writer, "    call {}", f.linker_name)?;
 
             // Push first argument back onto the stack
@@ -595,7 +762,11 @@ impl<W: Write> CodeGen<W> {
         } else {
             f.apply(&ident, &mut self.type_stack)?;
             writeln!(self.writer, "    mov rax, 0")?;
-            writeln!(self.writer, "    call {}", f.linker_name)?;
+            if FASM_SYMBOLS.contains(&f.linker_name) {
+                writeln!(self.writer, "    call _{}", f.linker_name)?;
+            } else {
+                writeln!(self.writer, "    call {}", f.linker_name)?;
+            }
         }
 
         // for t in f.returns {
