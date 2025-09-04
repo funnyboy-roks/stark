@@ -4,10 +4,12 @@ use clap::Parser;
 
 #[derive(Debug, Clone, Parser)]
 pub struct Cli {
-    #[clap(short, long)]
+    #[clap(short, long, conflicts_with = "lex", conflicts_with = "ir")]
     pub parse: bool,
-    #[clap(short, long, conflicts_with = "parse")]
+    #[clap(short, long, conflicts_with = "parse", conflicts_with = "ir")]
     pub lex: bool,
+    #[clap(short, long, conflicts_with = "lex", conflicts_with = "parse")]
+    pub ir: bool,
 
     #[clap(long)]
     pub auto_drop: bool,

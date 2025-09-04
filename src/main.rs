@@ -8,6 +8,7 @@ pub mod cli;
 pub mod compile;
 // pub mod eval;
 pub mod hash_float;
+pub mod ir;
 pub mod lex;
 pub mod parse;
 
@@ -37,6 +38,21 @@ fn main() -> Result<(), miette::Error> {
             ))
         })?;
         dbg!(ast);
+    } else if cli.ir {
+        eprintln!("generating ir...");
+        let parser = parse::Parser::new(lex);
+        let ast = parser.parse().map_err(|e| {
+            miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            ))
+        })?;
+        ir::process(&cli, ast).map_err(|e| {
+            miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            ))
+        })?;
     } else {
         eprintln!("compiling...");
         let asm_path = cli

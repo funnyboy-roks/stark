@@ -152,7 +152,7 @@ impl Display for FloatRegister {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Value {
-    Immediate(i64),
+    Immediate(i128),
     Label(String),
     Register(Register),
 }
@@ -163,8 +163,8 @@ impl From<String> for Value {
     }
 }
 
-impl From<i64> for Value {
-    fn from(value: i64) -> Self {
+impl From<i128> for Value {
+    fn from(value: i128) -> Self {
         Self::Immediate(value)
     }
 }
@@ -609,7 +609,7 @@ pub enum CompileError {
 #[derive(Default, Debug, Clone)]
 pub struct DataItems {
     bytes: HashMap<Box<[u8]>, usize>,
-    floats: HashMap<FloatExt<f32>, usize>,
+    floats: HashMap<FloatExt<f64>, usize>,
 }
 
 impl DataItems {
@@ -625,7 +625,7 @@ impl DataItems {
         format!("bytes_{}", n)
     }
 
-    pub fn add_float(&mut self, float: f32) -> String {
+    pub fn add_float(&mut self, float: f64) -> String {
         let len = self.floats.len();
         let n = self.floats.entry(float.into()).or_insert(len);
         format!("float_{}", n)
@@ -982,6 +982,10 @@ where
                     }
                 }
             }
+            AtomKind::BoolLit(n) => {
+                Type::Bool.push(&mut self.out, if *n { 1 } else { 0 })?;
+                self.type_stack.push(Type::Bool);
+            }
             // TODO: Fat pointers
             AtomKind::StrLit(s) => {
                 let label = self.data.add_bytes(s.as_bytes().into());
@@ -1191,7 +1195,9 @@ where
         While {
             while_token,
             condition,
+            condition_span: _,
             body,
+            body_span: _,
         }: &While,
     ) -> Result<(), CompileError> {
         let start = self.type_stack.clone();
@@ -1248,6 +1254,7 @@ where
         Then {
             then_token,
             body,
+            body_span: _,
             else_thens,
             elze,
         }: &Then,

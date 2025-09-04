@@ -23,6 +23,7 @@ pub enum AtomKind {
     NumLit(NumLit),
     StrLit(String),
     CStrLit(CString),
+    BoolLit(bool),
     Type(TypeAtom),
     // FloatLit(i64), // TODO
 
@@ -58,6 +59,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::StrLit(s) => Ok(Self::StrLit(s)),
             TokenValue::CStrLit(s) => Ok(Self::CStrLit(s)),
             TokenValue::NumLit(n) => Ok(Self::NumLit(n)),
+            TokenValue::BoolLit(n) => Ok(Self::BoolLit(n)),
             TokenValue::Plus => Ok(Self::Plus),
             TokenValue::Minus => Ok(Self::Minus),
             TokenValue::Asterisk => Ok(Self::Asterisk),
@@ -134,6 +136,7 @@ pub struct ElseThen {
 pub struct Then {
     pub then_token: Token,
     pub body: Vec<Ast>,
+    pub body_span: SourceSpan,
     pub else_thens: Vec<ElseThen>,
     pub elze: Option<(Vec<Ast>, Token)>,
 }
@@ -145,7 +148,17 @@ pub struct Then {
 pub struct While {
     pub while_token: Token,
     pub condition: Vec<Ast>,
+    pub condition_span: SourceSpan,
     pub body: Vec<Ast>,
+    pub body_span: SourceSpan,
+}
+
+impl While {
+    pub fn span(&self) -> SourceSpan {
+        let start = self.while_token.span.offset();
+        let end = self.body_span.offset() + self.body_span.len();
+        (start, end - start).into()
+    }
 }
 
 // TODO: This isn't really an ast
@@ -157,6 +170,19 @@ pub enum Ast {
     Fn(Fn),
     Then(Then),
     While(While),
+}
+
+impl Ast {
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Ast::Ident(ident) => ident.span,
+            Ast::Atom(atom) => atom.token.span,
+            Ast::ExternFn(_) => todo!(),
+            Ast::Fn(_) => todo!(),
+            Ast::Then(_) => todo!(),
+            Ast::While(w) => w.span(),
+        }
+    }
 }
 
 pub struct Parser<'a> {
@@ -197,7 +223,7 @@ pub enum ParseError {
     ExpectedInteger {
         #[label = "here"]
         span: SourceSpan,
-        found: f32,
+        found: f64,
     },
     #[error("Nested function definitions are not supported")]
     NestedFunction {
@@ -316,7 +342,7 @@ impl<'a> Parser<'a> {
                 return Err(ParseError::unexpected_token(
                     token,
                     &[TokenKind::Ident, TokenKind::Asterisk],
-                ))
+                ));
             }
         }
     }
@@ -522,7 +548,7 @@ impl<'a> Parser<'a> {
                             return Err(ParseError::ExpectedInteger {
                                 span: num.span,
                                 found: val,
-                            })
+                            });
                         }
                     };
 
@@ -541,6 +567,7 @@ impl<'a> Parser<'a> {
                 TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::BoolLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
@@ -577,8 +604,12 @@ impl<'a> Parser<'a> {
 
     fn take_then(&mut self, then_token: Token) -> Result<Then, ParseError> {
         // expect_token!(self, Then);
-        expect_token!(self, LCurly);
-        let (body, _) = self.take_body(TokenKind::RCurly, Some(&then_token))?;
+        let (body_start, _) = expect_token!(self, LCurly);
+        let (body, body_end) = self.take_body(TokenKind::RCurly, Some(&then_token))?;
+        let body_span = SourceSpan::new(
+            body_start.span.offset().into(),
+            body_end.span.offset() + body_end.span.len() - body_start.span.offset(),
+        );
 
         let mut else_thens = Vec::new();
 
@@ -587,6 +618,7 @@ impl<'a> Parser<'a> {
                 return Ok(Then {
                     then_token,
                     body,
+                    body_span,
                     else_thens,
                     elze: None,
                 });
@@ -598,6 +630,7 @@ impl<'a> Parser<'a> {
                     return Ok(Then {
                         then_token,
                         body,
+                        body_span,
                         else_thens,
                         elze: Some((else_body, else_token)),
                     });
@@ -620,12 +653,23 @@ impl<'a> Parser<'a> {
     fn take_while(&mut self, while_token: Token) -> Result<While, ParseError> {
         // expect_token!(self, Then);
         let (condition, l_curly) = self.take_body(TokenKind::LCurly, Some(&while_token))?;
-        let (body, _) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
+        let (body, r_curly) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
+
+        let c_start = condition[0].span().offset();
+        let c_end = condition[condition.len() - 1].span();
+        let c_end = c_end.offset() + c_end.len();
+
+        let body_span = SourceSpan::new(
+            l_curly.span.offset().into(),
+            r_curly.span.offset() + r_curly.span.len() - l_curly.span.offset(),
+        );
 
         Ok(While {
             while_token,
             condition,
+            condition_span: (c_start, c_end - c_start).into(),
             body,
+            body_span,
         })
     }
 
@@ -665,7 +709,7 @@ impl<'a> Parser<'a> {
                             return Err(ParseError::ExpectedInteger {
                                 span: num.span,
                                 found: val,
-                            })
+                            });
                         }
                     };
 
@@ -684,6 +728,7 @@ impl<'a> Parser<'a> {
                 TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::BoolLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
