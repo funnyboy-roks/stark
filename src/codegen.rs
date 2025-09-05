@@ -581,7 +581,7 @@ impl<W: Write> CodeGen<W> {
         self.type_stack.extend_from_slice(&func.args);
 
         if FASM_SYMBOLS.contains(&f.linker_name) {
-            writeln!(self.writer, "_{}:", f.linker_name)?;
+            writeln!(self.writer, "__stark_{}:", f.linker_name)?;
         } else {
             writeln!(self.writer, "{}:", f.linker_name)?;
         }
@@ -589,13 +589,43 @@ impl<W: Write> CodeGen<W> {
         if is_main {
             writeln!(self.writer, "    push rbp")?;
             writeln!(self.writer, "    mov rbp, rsp")?;
+        } else {
+            // writeln!(self.writer, "    push rbp")?;
+            // writeln!(self.writer, "    mov rbp, rsp")?;
+            writeln!(self.writer, "    mov rax, [rsp]")?; // save the return pointer
+            writeln!(self.writer)?;
+            writeln!(self.writer, "    mov rdi, rsp")?; // rdi is the destination for the `movsq` instruction
+            writeln!(self.writer, "    mov rsi, rsp")?; // rsi is the source for the `movsq` instruction
+            writeln!(self.writer, "    add rsi, 8")?; // rsi+8 to shift everything down
+            writeln!(self.writer)?;
+            writeln!(self.writer, "    mov rcx, {}", func.args.len())?; // repeat for each arg
+            writeln!(self.writer, "    cld")?; // clear direction flag so `rep` increments
+            writeln!(self.writer, "    rep movsq")?;
+            // save the return address on the bottom of the stack
+            writeln!(self.writer, "    mov [rsp+{}], rax", func.args.len() * 8)?;
         }
 
+        let returns_len = func.returns.len();
         self.compile_body(f.body)?;
 
         if is_main {
             writeln!(self.writer, "    mov rax, 0")?;
             writeln!(self.writer, "    pop rbp")?;
+        }
+
+        if returns_len != 0 {
+            writeln!(self.writer, "    mov rax, [rsp+{}]", returns_len * 8)?; // get the return address from the bottom of the stack
+            writeln!(self.writer)?;
+            writeln!(self.writer, "    mov rsi, rsp")?;
+            writeln!(self.writer, "    add rsi, {}", (returns_len - 1) * 8)?;
+            writeln!(self.writer, "    mov rdi, rsp")?;
+            writeln!(self.writer, "    add rdi, {}", returns_len * 8)?;
+            writeln!(self.writer)?;
+            writeln!(self.writer, "    std")?; // set direction flag so `rep` decrements
+            writeln!(self.writer, "    mov rcx, {}", returns_len)?;
+            writeln!(self.writer, "    rep movsq")?;
+            writeln!(self.writer)?;
+            writeln!(self.writer, "    mov [rsp], rax")?;
         }
 
         writeln!(self.writer, "    ret")?;
@@ -712,7 +742,6 @@ impl<W: Write> CodeGen<W> {
         let f = &self.module.functions[&ident.ident];
 
         if f.external {
-            let mut count = 0;
             let mut register_i = 0;
             let mut float_i = 0;
             let mut argi = 0;
@@ -740,11 +769,11 @@ impl<W: Write> CodeGen<W> {
                     }
                     ArgumentDest::FloatRegister => todo!("overflow on stack"),
                 }
-                count += 1;
             }
 
             self.type_stack.extend_from_slice(&f.returns);
-            writeln!(self.writer, "    mov rax, {}", count)?;
+            // TODO: What should go in rax?
+            writeln!(self.writer, "    mov rax, {}", 0)?;
             writeln!(self.writer, "    call {}", f.linker_name)?;
 
             // Push first argument back onto the stack
@@ -763,7 +792,7 @@ impl<W: Write> CodeGen<W> {
             f.apply(&ident, &mut self.type_stack)?;
             writeln!(self.writer, "    mov rax, 0")?;
             if FASM_SYMBOLS.contains(&f.linker_name) {
-                writeln!(self.writer, "    call _{}", f.linker_name)?;
+                writeln!(self.writer, "    call __stark_{}", f.linker_name)?;
             } else {
                 writeln!(self.writer, "    call {}", f.linker_name)?;
             }

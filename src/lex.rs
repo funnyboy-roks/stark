@@ -418,10 +418,10 @@ impl<'a> Lexer<'a> {
         self.offset += 1;
         let start = self.offset;
         let mut end = self.offset;
-        let content = self.content[self.offset..].chars();
+        let mut content = self.content[self.offset..].chars().peekable();
         let mut escaping = false;
         let mut owned: Option<String> = None;
-        for c in content {
+        while let Some(c) = content.next() {
             match c {
                 '\\' if !escaping => {
                     if owned.is_none() {
@@ -441,6 +441,28 @@ impl<'a> Lexer<'a> {
                     if let Some(ref mut owned) = owned {
                         owned.push('\n');
                     }
+                    escaping = false;
+                }
+                '0' if escaping => {
+                    let mut s = String::with_capacity(3);
+                    if let Some(a @ ('0'..='7')) = content.next() {
+                        s.push(a);
+                        end += a.len_utf8();
+                    } else {
+                        todo!("invalid escape")
+                    };
+                    if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
+                        s.push(a);
+                        end += a.len_utf8();
+                    }
+                    if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
+                        s.push(a);
+                        end += a.len_utf8();
+                    }
+                    owned
+                        .as_mut()
+                        .unwrap()
+                        .push(char::from(u8::from_str_radix(&s, 8).expect("TODO")));
                     escaping = false;
                 }
                 c => {

@@ -923,7 +923,7 @@ impl Builtin {
                 };
                 let b_ir = ir_stack.pop().expect("checked by caller");
                 let a_ir = ir_stack.pop().expect("checked by caller");
-                assert!(a_ty.add(b_ty).is_some());
+                assert!(a_ty.equal(b_ty).is_some());
 
                 let spans = [b_ir.span, a_ir.span, current.span];
                 match b_ty {
@@ -1012,6 +1012,7 @@ pub struct WhileIr {
 
 #[derive(Debug, Clone)]
 pub struct ElseThenIr {
+    pub then_span: SourceSpan,
     pub condition: Vec<Ir>,
     pub body: Vec<Ir>,
 }
@@ -1544,7 +1545,11 @@ impl Module {
 
                 let mut else_thens = Vec::with_capacity(t.else_thens.len());
                 for et in t.else_thens {
+                    // reset type stack
+                    type_stack.clear();
+                    type_stack.extend_from_slice(&before);
                     let mut condition = Vec::with_capacity(et.condition.len());
+                    let then_span = et.then_token.span;
                     self.compile_body(type_stack, &mut condition, outer_loop, et.condition)?;
                     type_stack.pop_type(et.then_token.span, &Type::Bool)?;
 
@@ -1557,13 +1562,17 @@ impl Module {
                             span: et.then_token.span,
                         });
                     }
-                    // reset type stack
-                    type_stack.clear();
-                    type_stack.extend_from_slice(&before);
 
-                    else_thens.push(ElseThenIr { condition, body });
+                    else_thens.push(ElseThenIr {
+                        then_span,
+                        condition,
+                        body,
+                    });
                 }
 
+                // reset type stack
+                type_stack.clear();
+                type_stack.extend_from_slice(&before);
                 let elze = if let Some((elze_body, token)) = t.elze {
                     let mut body = Vec::with_capacity(elze_body.len());
                     self.compile_body(type_stack, &mut body, outer_loop, elze_body)?;
@@ -1574,8 +1583,6 @@ impl Module {
                             span: token.span,
                         });
                     }
-                    type_stack.clear();
-                    type_stack.extend_from_slice(&before);
                     body
                 } else {
                     Vec::new()
@@ -1776,7 +1783,7 @@ pub fn update_stacks(
                     // { 3 }
                     if !t.elze.is_empty() {
                         ir_stack.reserve(t.body.len());
-                        for x in t.body.drain(..) {
+                        for x in t.elze.drain(..) {
                             update_stacks(functions, x, ir_stack, type_stack)?;
                         }
                     } else {
@@ -1788,6 +1795,14 @@ pub fn update_stacks(
                     // y then { 2 } else { 3 }
                     let et = t.else_thens.remove(0);
                     t.body = et.body;
+                    t.then_span = et.then_span;
+                    for c in et.condition {
+                        update_stacks(functions, c, ir_stack, type_stack)?;
+                    }
+                    type_stack.pop_type(et.then_span, &Type::Bool)?;
+                    for x in t.body.clone() {
+                        update_stacks(functions, x, &mut Vec::new(), type_stack)?;
+                    }
                     ir_stack.push(ir);
                 }
             } else {

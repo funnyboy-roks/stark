@@ -60,11 +60,14 @@ fn main() -> Result<(), miette::Error> {
     } else if cli.codegen {
         eprintln!("generating ir...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
+        let ast = parser.parse().map_err(|e| match e {
+            parse::ParseError::LexError(e) => miette::Error::from(e).with_source_code(
+                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
+            ),
+            _ => miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
                 content.to_string(),
-            ))
+            )),
         })?;
         let mut module = Module::new(ast);
         module.compile_module().map_err(|e| {
