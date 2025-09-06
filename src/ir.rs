@@ -1327,16 +1327,19 @@ pub struct Module {
     /// The ASTs for the module
     asts: Vec<Ast>,
 
+    quiet: bool,
+
     pub functions: HashMap<String, FunctionSignature>,
     pub converted_functions: Vec<ConvertedFunction>,
 }
 
 impl Module {
-    pub fn new(asts: Vec<Ast>) -> Self {
+    pub fn new(asts: Vec<Ast>, quiet: bool) -> Self {
         Self {
             asts,
             functions: Default::default(),
             converted_functions: Default::default(),
+            quiet,
         }
     }
 
@@ -1464,7 +1467,9 @@ impl Module {
                 ));
             }};
         }
-        eprintln!("type_stack = {:?}", type_stack);
+        if !self.quiet {
+            eprintln!("type_stack = {:?}", type_stack);
+        }
         match ast {
             Ast::Ident(ident) => {
                 let f = self.functions.get(&ident.ident).ok_or_else(|| {
@@ -1793,17 +1798,14 @@ pub fn update_stacks(
                     // false then { 1 } else y then { 2 } else { 3 }
                     // becomes
                     // y then { 2 } else { 3 }
+                    // which we then feed back to `update_stacks`.
                     let et = t.else_thens.remove(0);
                     t.body = et.body;
                     t.then_span = et.then_span;
                     for c in et.condition {
                         update_stacks(functions, c, ir_stack, type_stack)?;
                     }
-                    type_stack.pop_type(et.then_span, &Type::Bool)?;
-                    for x in t.body.clone() {
-                        update_stacks(functions, x, &mut Vec::new(), type_stack)?;
-                    }
-                    ir_stack.push(ir);
+                    update_stacks(functions, ir, ir_stack, type_stack)?;
                 }
             } else {
                 let mut body_ir = Vec::with_capacity(t.body.len());

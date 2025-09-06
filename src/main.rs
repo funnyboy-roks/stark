@@ -50,15 +50,33 @@ fn main() -> Result<(), miette::Error> {
                 content.to_string(),
             ))
         })?;
-        let mut module = Module::new(ast);
+        let mut module = Module::new(ast, false);
         module.compile_module().map_err(|e| {
             miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
                 content.to_string(),
             ))
         })?;
+
+        eprintln!(
+            "[{}:{}:{}] maker.functions = {:?}",
+            file!(),
+            line!(),
+            column!(),
+            module.functions,
+        );
+        eprintln!("Function Signatures:");
+        for x in &module.functions {
+            eprintln!("    {}", x.1);
+        }
+        eprintln!("Functions:");
+        for x in &module.converted_functions {
+            eprintln!("    {}:", x.linker_name);
+            for y in &x.body {
+                eprintln!("        {:?}", y.kind);
+            }
+        }
     } else if cli.codegen {
-        eprintln!("generating ir...");
         let parser = parse::Parser::new(lex);
         let ast = parser.parse().map_err(|e| match e {
             parse::ParseError::LexError(e) => miette::Error::from(e).with_source_code(
@@ -69,7 +87,7 @@ fn main() -> Result<(), miette::Error> {
                 content.to_string(),
             )),
         })?;
-        let mut module = Module::new(ast);
+        let mut module = Module::new(ast, true);
         module.compile_module().map_err(|e| {
             miette::Error::from(e).with_source_code(NamedSource::new(
                 cli.file.to_string_lossy(),
@@ -77,7 +95,6 @@ fn main() -> Result<(), miette::Error> {
             ))
         })?;
 
-        eprintln!();
         eprintln!("generating code...");
         let mut codegen = codegen::CodeGen::new(module, std::io::stdout());
         codegen.compile().map_err(|e| match e {

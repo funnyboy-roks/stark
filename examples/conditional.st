@@ -10,7 +10,7 @@ fn main {
     } drop
     c"\n" printf drop
 
-    5 2 + 8 = blackbox then {
+    5 2 + 8 = then {
         c"hello" printf
     } else 1 2 = then {
         c"world" printf

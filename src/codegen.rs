@@ -5,7 +5,10 @@ use thiserror::Error;
 
 use crate::{
     hash_float::FloatExt,
-    ir::{Builtin, ConvertedFunction, Ir, IrGenError, IrKind, Module, ThenIr, Type, TypeStack},
+    ir::{
+        Builtin, ConvertedFunction, Ir, IrGenError, IrKind, Module, ThenIr, Type, TypeStack,
+        WhileIr,
+    },
     parse::Ident,
     ty,
 };
@@ -376,8 +379,56 @@ impl Builtin {
                     writeln!(writer, "    push {}", Register::Rax.for_size(ty.size()))?;
                 }
             }
-            Builtin::Div => todo!(),
-            Builtin::Mod => todo!(),
+            Builtin::Div => {
+                let ty = &type_stack[len - 1];
+                if ty.is_float() {
+                    todo!("float div");
+                } else {
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
+                    assert!(type_stack[len - 1].is_integer());
+                    writeln!(
+                        writer,
+                        "    xor {0}, {0}",
+                        Register::Rdx.for_size(ty.size())
+                    )?;
+                    writeln!(writer, "    popq {}", Register::Rbx.for_size(ty.size()))?;
+                    writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                    writeln!(
+                        writer,
+                        "    {} {}",
+                        if ty.is_signed() { "idiv" } else { "div" },
+                        Register::Rbx.for_size(ty.size())
+                    )?;
+                    // rdx is the quotent
+                    writeln!(writer, "    push {}", Register::Rax.for_size(ty.size()))?;
+                }
+            }
+            Builtin::Mod => {
+                let ty = &type_stack[len - 1];
+                if ty.is_float() {
+                    todo!("float mod");
+                } else {
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
+                    assert!(type_stack[len - 1].is_integer());
+                    writeln!(
+                        writer,
+                        "    xor {0}, {0}",
+                        Register::Rdx.for_size(ty.size())
+                    )?;
+                    writeln!(writer, "    popq {}", Register::Rbx.for_size(ty.size()))?;
+                    writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                    writeln!(
+                        writer,
+                        "    {} {}",
+                        if ty.is_signed() { "idiv" } else { "div" },
+                        Register::Rbx.for_size(ty.size())
+                    )?;
+                    // rdx is the remainder
+                    writeln!(writer, "    push {}", Register::Rdx.for_size(ty.size()))?;
+                }
+            }
             Builtin::Equal => {
                 compare!(a, b);
                 writeln!(writer, "    sete al")?;
@@ -681,11 +732,11 @@ impl<W: Write> CodeGen<W> {
                 self.type_stack.truncate(len - consumed);
                 self.type_stack.extend_from_slice(&returns);
             }
-            IrKind::Then(then) => {
-                self.compile_then(then)?;
+            IrKind::Then(then) => self.compile_then(then)?,
+            IrKind::While(whil) => self.compile_while(whil)?,
+            IrKind::Break(id) => {
+                writeln!(self.writer, "    jmp .{}_break", id)?;
             }
-            IrKind::While(_) => nyi!(ir.span, "while loops"),
-            IrKind::Break(_) => nyi!(ir.span, "break statements"),
             IrKind::Cast(_) => nyi!(ir.span, "casting"),
         }
         Ok(())
@@ -738,6 +789,38 @@ impl<W: Write> CodeGen<W> {
         Ok(())
     }
 
+    fn compile_while(&mut self, whil: WhileIr) -> Result<(), CodeGenError> {
+        let id = whil.loop_id;
+        let start = self.type_stack.clone();
+
+        // general structure:
+        // ```asm
+        //     jmp .while_end_0
+        // .while_0:
+        //     ; body
+        //  .while_end_0:
+        //     ; condition
+        //     popq rax
+        //     cmp rax, 0
+        //     jne .while_0
+        // ```
+
+        writeln!(self.writer, "    jmp .{}_end", id)?;
+        writeln!(self.writer, ".{}:", id)?;
+        self.compile_body(whil.body)?;
+        assert!(start.matches(&self.type_stack));
+        writeln!(self.writer, ".{}_end:", id)?;
+        self.compile_body(whil.condition)?;
+        self.type_stack.pop_type(whil.condition_span, &Type::Bool)?;
+        writeln!(self.writer, "    popq rax")?;
+        writeln!(self.writer, "    cmp rax, 0")?;
+        writeln!(self.writer, "    jne .{}", id)?;
+        writeln!(self.writer, ".{}_break:", id)?;
+        assert!(start.matches(&self.type_stack));
+
+        Ok(())
+    }
+
     fn compile_function_call(&mut self, ident: Ident) -> Result<(), CodeGenError> {
         let f = &self.module.functions[&ident.ident];
 
@@ -748,7 +831,7 @@ impl<W: Write> CodeGen<W> {
             for _ in 0..ident.len.map(|x| x as usize).unwrap_or(f.args.len()) {
                 let ty = self.type_stack.pop(ident.span)?;
                 if argi < f.args.len() {
-                    assert_eq!(ty, f.args[argi]);
+                    assert!(ty.matches(&f.args[argi]));
                     argi += 1;
                 }
                 let dest = ty.argument_dest();

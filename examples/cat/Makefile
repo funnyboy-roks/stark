@@ -5,4 +5,4 @@ cat.o: cat.s
 	fasm cat.s cat.o
 
 cat.s: cat.st
-	cargo r -- cat.st -o cat.s
+	cargo r -- --gen cat.st > cat.s
