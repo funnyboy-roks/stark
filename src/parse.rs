@@ -5,11 +5,31 @@ use thiserror::Error;
 
 use crate::lex::{LexError, Lexer, NumLit, NumLitVal, Token, TokenKind, TokenValue};
 
+pub fn combine_span(spans: impl IntoIterator<Item = SourceSpan>) -> SourceSpan {
+    let mut start = usize::MAX;
+    let mut end = 0;
+    for span in spans {
+        start = start.min(span.offset());
+        end = end.max(span.offset() + span.len());
+    }
+    (start, end - start).into()
+}
+
+pub trait Spanned {
+    fn span(&self) -> SourceSpan;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
     pub ident: String,
     pub len: Option<u32>,
     pub span: SourceSpan,
+}
+
+impl Spanned for Ident {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +43,8 @@ pub enum AtomKind {
     NumLit(NumLit),
     StrLit(String),
     CStrLit(CString),
+    BoolLit(bool),
     Type(TypeAtom),
-    // FloatLit(i64), // TODO
 
     // Ops
     Plus,
@@ -33,7 +53,11 @@ pub enum AtomKind {
     Slash,
     Equal,
     Not,
+    Neq,
     Lt,
+    Lte,
+    Gt,
+    Gte,
     Percent,
 
     // Keywords
@@ -58,13 +82,18 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::StrLit(s) => Ok(Self::StrLit(s)),
             TokenValue::CStrLit(s) => Ok(Self::CStrLit(s)),
             TokenValue::NumLit(n) => Ok(Self::NumLit(n)),
+            TokenValue::BoolLit(n) => Ok(Self::BoolLit(n)),
             TokenValue::Plus => Ok(Self::Plus),
             TokenValue::Minus => Ok(Self::Minus),
             TokenValue::Asterisk => Ok(Self::Asterisk),
             TokenValue::Slash => Ok(Self::Slash),
             TokenValue::Equal => Ok(Self::Equal),
             TokenValue::Not => Ok(Self::Not),
+            TokenValue::Neq => Ok(Self::Neq),
             TokenValue::Lt => Ok(Self::Lt),
+            TokenValue::Lte => Ok(Self::Lte),
+            TokenValue::Gt => Ok(Self::Gt),
+            TokenValue::Gte => Ok(Self::Gte),
             TokenValue::Percent => Ok(Self::Percent),
             TokenValue::Ellipsis => Err(()),
             TokenValue::Arrow => Err(()),
@@ -74,6 +103,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Drop => Ok(Self::Drop),
             TokenValue::Extern => Err(()),
             TokenValue::Fn => Err(()),
+            TokenValue::Cast => Err(()),
             TokenValue::Then => Err(()),
             TokenValue::Else => Err(()),
             TokenValue::While => Err(()),
@@ -86,6 +116,12 @@ impl TryFrom<TokenValue> for AtomKind {
 pub struct Atom {
     pub token: Token,
     pub kind: AtomKind,
+}
+
+impl Spanned for Atom {
+    fn span(&self) -> SourceSpan {
+        self.token.span
+    }
 }
 
 impl TryFrom<Token> for Atom {
@@ -108,6 +144,12 @@ pub struct ExternFn {
     pub returns: Vec<TypeAtom>,
 }
 
+impl Spanned for ExternFn {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fn {
     pub name: String,
@@ -119,12 +161,24 @@ pub struct Fn {
     pub body: Vec<Ast>,
 }
 
+impl Spanned for Fn {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ElseThen {
     pub else_token: Token,
     pub then_token: Token,
     pub condition: Vec<Ast>,
     pub body: Vec<Ast>,
+}
+
+impl Spanned for ElseThen {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
 }
 
 /// ```stark
@@ -134,8 +188,15 @@ pub struct ElseThen {
 pub struct Then {
     pub then_token: Token,
     pub body: Vec<Ast>,
+    pub body_span: SourceSpan,
     pub else_thens: Vec<ElseThen>,
     pub elze: Option<(Vec<Ast>, Token)>,
+}
+
+impl Spanned for Then {
+    fn span(&self) -> SourceSpan {
+        todo!()
+    }
 }
 
 /// ```stark
@@ -145,7 +206,45 @@ pub struct Then {
 pub struct While {
     pub while_token: Token,
     pub condition: Vec<Ast>,
+    pub condition_span: SourceSpan,
     pub body: Vec<Ast>,
+    pub body_span: SourceSpan,
+}
+
+impl Spanned for While {
+    fn span(&self) -> SourceSpan {
+        let start = self.while_token.span.offset();
+        let end = self.body_span.offset() + self.body_span.len();
+        (start, end - start).into()
+    }
+}
+
+/// ```stark
+/// ... cast(*u8) ...
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cast {
+    /// ```stark
+    /// ... cast(*u8) ...
+    ///     ^^^^^^^^^
+    /// ```
+    span: SourceSpan,
+    /// ```stark
+    /// ... cast(*u8) ...
+    ///          ^^^
+    /// ```
+    pub target_span: SourceSpan,
+    /// ```stark
+    /// ... cast(*u8) ...
+    ///          ^^^
+    /// ```
+    pub target: TypeAtom,
+}
+
+impl Spanned for Cast {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
 }
 
 // TODO: This isn't really an ast
@@ -157,6 +256,21 @@ pub enum Ast {
     Fn(Fn),
     Then(Then),
     While(While),
+    Cast(Cast),
+}
+
+impl Spanned for Ast {
+    fn span(&self) -> SourceSpan {
+        match self {
+            Ast::Ident(i) => i.span(),
+            Ast::Atom(a) => a.span(),
+            Ast::ExternFn(f) => f.span(),
+            Ast::Fn(f) => f.span(),
+            Ast::Then(t) => t.span(),
+            Ast::While(w) => w.span(),
+            Ast::Cast(c) => c.span(),
+        }
+    }
 }
 
 pub struct Parser<'a> {
@@ -197,7 +311,7 @@ pub enum ParseError {
     ExpectedInteger {
         #[label = "here"]
         span: SourceSpan,
-        found: f32,
+        found: f64,
     },
     #[error("Nested function definitions are not supported")]
     NestedFunction {
@@ -297,7 +411,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_type(&mut self) -> Result<TypeAtom, ParseError> {
+    fn take_type(&mut self) -> Result<(TypeAtom, SourceSpan), ParseError> {
         let Some(token) = self.tokens.next() else {
             return Err(ParseError::UnexpectedEof {
                 expected: "type".into(),
@@ -308,15 +422,16 @@ impl<'a> Parser<'a> {
         let token = token?;
         match token.value {
             TokenValue::Asterisk => {
-                let inner = self.take_type()?;
-                Ok(TypeAtom::Pointer(Box::new(inner)))
+                let (inner, span) = self.take_type()?;
+                let span = combine_span([token.span, span]);
+                Ok((TypeAtom::Pointer(Box::new(inner)), span))
             }
-            TokenValue::Ident(ident) => Ok(TypeAtom::Ident(ident)),
+            TokenValue::Ident(ident) => Ok((TypeAtom::Ident(ident), token.span)),
             _ => {
                 return Err(ParseError::unexpected_token(
                     token,
                     &[TokenKind::Ident, TokenKind::Asterisk],
-                ))
+                ));
             }
         }
     }
@@ -331,7 +446,7 @@ impl<'a> Parser<'a> {
                     args.push(TypeAtom::Ident(ident));
                 }
                 TokenValue::Asterisk => {
-                    let ty = self.take_type()?;
+                    let (ty, _) = self.take_type()?;
                     args.push(TypeAtom::Pointer(Box::new(ty)));
                 }
                 TokenValue::RParen => {
@@ -522,7 +637,7 @@ impl<'a> Parser<'a> {
                             return Err(ParseError::ExpectedInteger {
                                 span: num.span,
                                 found: val,
-                            })
+                            });
                         }
                     };
 
@@ -541,13 +656,18 @@ impl<'a> Parser<'a> {
                 TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::BoolLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Neq => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Lte => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Gt => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Gte => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Percent => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
@@ -557,6 +677,9 @@ impl<'a> Parser<'a> {
                 TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Extern => Err(ParseError::NestedFunction { span: token.span })?,
                 TokenValue::Fn => Err(ParseError::NestedFunction { span: token.span })?,
+                TokenValue::Cast => {
+                    out.push(Ast::Cast(self.take_cast(token)?));
+                }
                 TokenValue::Then => {
                     let t = self.take_then(token)?;
                     out.push(Ast::Then(t));
@@ -575,10 +698,26 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn take_cast(&mut self, cast_token: Token) -> Result<Cast, ParseError> {
+        let (group_start, _) = expect_token!(self, LParen);
+        let (target, target_span) = self.take_type()?;
+        let (group_end, _) = expect_token!(self, RParen);
+
+        Ok(Cast {
+            span: combine_span([cast_token.span, group_start.span, group_end.span]),
+            target_span,
+            target,
+        })
+    }
+
     fn take_then(&mut self, then_token: Token) -> Result<Then, ParseError> {
         // expect_token!(self, Then);
-        expect_token!(self, LCurly);
-        let (body, _) = self.take_body(TokenKind::RCurly, Some(&then_token))?;
+        let (body_start, _) = expect_token!(self, LCurly);
+        let (body, body_end) = self.take_body(TokenKind::RCurly, Some(&then_token))?;
+        let body_span = SourceSpan::new(
+            body_start.span.offset().into(),
+            body_end.span.offset() + body_end.span.len() - body_start.span.offset(),
+        );
 
         let mut else_thens = Vec::new();
 
@@ -587,6 +726,7 @@ impl<'a> Parser<'a> {
                 return Ok(Then {
                     then_token,
                     body,
+                    body_span,
                     else_thens,
                     elze: None,
                 });
@@ -598,6 +738,7 @@ impl<'a> Parser<'a> {
                     return Ok(Then {
                         then_token,
                         body,
+                        body_span,
                         else_thens,
                         elze: Some((else_body, else_token)),
                     });
@@ -620,12 +761,23 @@ impl<'a> Parser<'a> {
     fn take_while(&mut self, while_token: Token) -> Result<While, ParseError> {
         // expect_token!(self, Then);
         let (condition, l_curly) = self.take_body(TokenKind::LCurly, Some(&while_token))?;
-        let (body, _) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
+        let (body, r_curly) = self.take_body(TokenKind::RCurly, Some(&l_curly))?;
+
+        let c_start = condition[0].span().offset();
+        let c_end = condition[condition.len() - 1].span();
+        let c_end = c_end.offset() + c_end.len();
+
+        let body_span = SourceSpan::new(
+            l_curly.span.offset().into(),
+            r_curly.span.offset() + r_curly.span.len() - l_curly.span.offset(),
+        );
 
         Ok(While {
             while_token,
             condition,
+            condition_span: (c_start, c_end - c_start).into(),
             body,
+            body_span,
         })
     }
 
@@ -665,7 +817,7 @@ impl<'a> Parser<'a> {
                             return Err(ParseError::ExpectedInteger {
                                 span: num.span,
                                 found: val,
-                            })
+                            });
                         }
                     };
 
@@ -684,12 +836,17 @@ impl<'a> Parser<'a> {
                 TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::BoolLit(_) => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Neq => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Lte => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Gt => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Gte => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Percent => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
@@ -705,6 +862,10 @@ impl<'a> Parser<'a> {
                 TokenValue::Fn => {
                     let f = self.take_fn()?;
                     out.push(Ast::Fn(f));
+                }
+                TokenValue::Cast => {
+                    let c = self.take_cast(token)?;
+                    out.push(Ast::Cast(c));
                 }
                 TokenValue::Then => {
                     let t = self.take_then(token)?;

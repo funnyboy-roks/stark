@@ -11,6 +11,7 @@ endif
 
 
 hi def link starkNumber Number
+hi def link starkFloat starkNumber
 hi def link starkDecNumber starkNumber
 hi def link starkHexNumber starkNumber
 hi def link starkBinNumber starkNumber
@@ -37,13 +38,15 @@ syntax keyword Label case default
 
 syntax keyword Type i64 i32 i16 i8
 syntax keyword Type u64 u32 u16 u8
-syntax keyword Type ptr fatptr bool
-
-syntax region Block start=/{/ end=/}/ transparent fold
+syntax keyword Type f32 f64
+syntax keyword Type fatptr bool
 
 syntax match starkDecNumber display "\<[0-9][0-9_]*"
 syntax match starkHexNumber display "\<0x[a-fA-F0-9_]\+"
 syntax match starkBinNumber display "\<0b[01_]\+"
+syntax match starkFloat     display "\<[0-9][0-9_]*\.[0-9][0-9_]*"
+
+syntax region Block start=/{/ end=/}/ transparent fold
 
 let b:current_syntax = "stark"
 

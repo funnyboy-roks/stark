@@ -1,0 +1,65 @@
+STDOUT:
+    swap_test
+        1 2 swap => Expected: 2 1, Actual: 2 1
+        2 1 swap => Expected: 1 2, Actual: 1 2
+    drop_test
+        1 2   drop => Expected: 1,   Actual: 1
+        1 2 3 drop => Expected: 1 2, Actual: 1 2
+    dup_test
+        1 2 dup => Expected: 1 2 2, Actual: 1 2 2
+        1   dup => Expected: 1 1,   Actual: 1 1
+    dup2_test
+        1 2   dup => Expected: 1 2 1 2,   Actual: 1 2 1 2
+        1 2 3 dup => Expected: 1 2 3 2 3, Actual: 1 2 3 2 3
+    not_test
+        false ! => Expected: true  (1), Actual: 1
+        true  ! => Expected: false (0), Actual: 0
+    equal_test
+        (1 2 =) => Expected: 0, Actual: 0
+        (1 1 =) => Expected: 1, Actual: 1
+    equal_test_float
+        (1.0 2.0 =) => Expected: 0, Actual: 0
+        (1.0 1.0 =) => Expected: 1, Actual: 1
+    not_equal_test
+        (1 2 !=) => Expected: 1, Actual: 1
+        (1 1 !=) => Expected: 0, Actual: 0
+    not_equal_test_float
+        (1.0 2.0 !=) => Expected: 1, Actual: 1
+        (1.0 1.0 !=) => Expected: 0, Actual: 0
+    lt_test
+        (1 2 <) => Expected: 1, Actual: 1
+        (1 1 <) => Expected: 0, Actual: 0
+        (2 1 <) => Expected: 0, Actual: 0
+    lt_test_float
+        (1.0 2.0 <) => Expected: 1, Actual: 1
+        (1.0 1.0 <) => Expected: 0, Actual: 0
+        (2.0 1.0 <) => Expected: 0, Actual: 0
+    lte_test
+        (1 2 <=) => Expected: 1, Actual: 1
+        (1 1 <=) => Expected: 1, Actual: 1
+        (2 1 <=) => Expected: 0, Actual: 0
+    lte_test_float
+        (1.0 2.0 <=) => Expected: 1, Actual: 1
+        (1.0 1.0 <=) => Expected: 1, Actual: 1
+        (2.0 1.0 <=) => Expected: 0, Actual: 0
+    gt_test
+        (1 2 >) => Expected: 0, Actual: 0
+        (1 1 >) => Expected: 0, Actual: 0
+        (2 1 >) => Expected: 1, Actual: 1
+    gt_test_float
+        (1.0 2.0 >) => Expected: 0, Actual: 0
+        (1.0 1.0 >) => Expected: 0, Actual: 0
+        (2.0 1.0 >) => Expected: 1, Actual: 1
+    gte_test
+        (1 2 >=) => Expected: 0, Actual: 0
+        (1 1 >=) => Expected: 1, Actual: 1
+        (2 1 >=) => Expected: 1, Actual: 1
+    gte_test_float
+        (1.0 2.0 >=) => Expected: 0, Actual: 0
+        (1.0 1.0 >=) => Expected: 1, Actual: 1
+        (2.0 1.0 >=) => Expected: 1, Actual: 1
+
+STDERR:
+
+
+STATUS: 0

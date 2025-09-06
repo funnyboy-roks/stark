@@ -20,12 +20,15 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "else" => TokenValue::Else,
     "while" => TokenValue::While,
     "break" => TokenValue::Break,
+    "true" => TokenValue::BoolLit(true),
+    "false" => TokenValue::BoolLit(false),
+    "cast" => TokenValue::Cast,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NumLitVal {
-    Integer(i64),
-    Float(f32),
+    Integer(i128),
+    Float(f64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,15 +64,32 @@ pub enum TokenKind {
     StrLit,
     CStrLit,
     NumLit,
+    BoolLit,
 
     // Ops
+    /// +
     Plus,
+    /// -
     Minus,
+    /// *
     Asterisk,
+    /// /
     Slash,
+    /// =
     Equal,
+    /// !
     Not,
+    /// !=
+    Neq,
+    /// <
     Lt,
+    /// <=
+    Lte,
+    /// >
+    Gt,
+    /// >=
+    Gte,
+    /// %
     Percent,
 
     // Symbols
@@ -85,6 +105,7 @@ pub enum TokenKind {
     Drop,
     Extern,
     Fn,
+    Cast,
 
     Then,
     Else,
@@ -105,7 +126,7 @@ pub enum TokenValue {
     StrLit(String),
     CStrLit(CString),
     NumLit(NumLit),
-    // FloatLit(i64), // TODO
+    BoolLit(bool),
 
     // Ops
     Plus,
@@ -114,7 +135,11 @@ pub enum TokenValue {
     Slash,
     Equal,
     Not,
+    Neq,
     Lt,
+    Lte,
+    Gt,
+    Gte,
     Percent,
 
     // Symbols
@@ -130,6 +155,7 @@ pub enum TokenValue {
     Drop,
     Extern,
     Fn,
+    Cast,
 
     Then,
     Else,
@@ -156,13 +182,18 @@ impl TokenValue {
             TokenValue::StrLit(_) => TokenKind::StrLit,
             TokenValue::CStrLit(_) => TokenKind::CStrLit,
             TokenValue::NumLit(_) => TokenKind::NumLit,
+            TokenValue::BoolLit(_) => TokenKind::BoolLit,
             TokenValue::Plus => TokenKind::Plus,
             TokenValue::Minus => TokenKind::Minus,
             TokenValue::Asterisk => TokenKind::Asterisk,
             TokenValue::Slash => TokenKind::Slash,
             TokenValue::Equal => TokenKind::Equal,
             TokenValue::Not => TokenKind::Not,
+            TokenValue::Neq => TokenKind::Neq,
             TokenValue::Lt => TokenKind::Lt,
+            TokenValue::Lte => TokenKind::Lte,
+            TokenValue::Gt => TokenKind::Gt,
+            TokenValue::Gte => TokenKind::Gte,
             TokenValue::Percent => TokenKind::Percent,
             TokenValue::Ellipsis => TokenKind::Ellipsis,
             TokenValue::Arrow => TokenKind::Arrow,
@@ -172,6 +203,7 @@ impl TokenValue {
             TokenValue::Drop => TokenKind::Drop,
             TokenValue::Extern => TokenKind::Extern,
             TokenValue::Fn => TokenKind::Fn,
+            TokenValue::Cast => TokenKind::Cast,
             TokenValue::Then => TokenKind::Then,
             TokenValue::Else => TokenKind::Else,
             TokenValue::While => TokenKind::While,
@@ -316,11 +348,11 @@ impl<'a> Lexer<'a> {
                     .unwrap_or(num.len());
                 (&num[..x], Radix::Dec)
             }
-            ('0', Some(c)) => {
+            ('0', Some(c @ ('a'..='z' | 'A'..='Z' | '_'))) => {
                 return Err(LexError::UnexpectedCharacter {
                     span: (self.offset..self.offset + 1).into(),
                     found: c,
-                })
+                });
             }
             (_, _) => {
                 let x = num
@@ -348,14 +380,12 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        dbg!(float, string, radix);
-
         self.offset += string.len();
         if float {
             string
-                .parse::<f32>()
+                .parse::<f64>()
                 .map(|x| NumLit {
-                    value: NumLitVal::Float(x * neg as f32),
+                    value: NumLitVal::Float(x * neg as f64),
                     radix,
                 })
                 .map_err(|e| LexError::FloatParseError {
@@ -363,7 +393,7 @@ impl<'a> Lexer<'a> {
                     source: e,
                 })
         } else {
-            i64::from_str_radix(string, radix.radix())
+            i128::from_str_radix(string, radix.radix())
                 .map(|x| NumLit {
                     value: NumLitVal::Integer(x * neg),
                     radix,
@@ -388,10 +418,10 @@ impl<'a> Lexer<'a> {
         self.offset += 1;
         let start = self.offset;
         let mut end = self.offset;
-        let content = self.content[self.offset..].chars();
+        let mut content = self.content[self.offset..].chars().peekable();
         let mut escaping = false;
         let mut owned: Option<String> = None;
-        for c in content {
+        while let Some(c) = content.next() {
             match c {
                 '\\' if !escaping => {
                     if owned.is_none() {
@@ -411,6 +441,28 @@ impl<'a> Lexer<'a> {
                     if let Some(ref mut owned) = owned {
                         owned.push('\n');
                     }
+                    escaping = false;
+                }
+                '0' if escaping => {
+                    let mut s = String::with_capacity(3);
+                    if let Some(a @ ('0'..='7')) = content.next() {
+                        s.push(a);
+                        end += a.len_utf8();
+                    } else {
+                        todo!("invalid escape")
+                    };
+                    if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
+                        s.push(a);
+                        end += a.len_utf8();
+                    }
+                    if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
+                        s.push(a);
+                        end += a.len_utf8();
+                    }
+                    owned
+                        .as_mut()
+                        .unwrap()
+                        .push(char::from(u8::from_str_radix(&s, 8).expect("TODO")));
                     escaping = false;
                 }
                 c => {
@@ -494,11 +546,9 @@ impl Iterator for Lexer<'_> {
             let start = self.offset;
             match (c, c2) {
                 ('0'..='9', _) => {
-                    return Some(
-                        self.take_number().map(|n| {
-                            Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
-                        }),
-                    )
+                    return Some(self.take_number().map(|n| {
+                        Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
+                    }));
                 }
                 ('/', Some('/')) => {
                     self.offset += 2;
@@ -511,11 +561,9 @@ impl Iterator for Lexer<'_> {
                     };
                 }
                 ('-', Some('0'..='9')) => {
-                    return Some(
-                        self.take_number().map(|n| {
-                            Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
-                        }),
-                    )
+                    return Some(self.take_number().map(|n| {
+                        Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
+                    }));
                 }
                 ('-', Some('>')) => {
                     self.offset += 2;
@@ -546,7 +594,7 @@ impl Iterator for Lexer<'_> {
                 ('a'..='z' | 'A'..='Z' | '_', _) => {
                     return Some(self.take_ident().map(|n| {
                         Token::new(start..self.offset, self.file, TokenValue::from_ident(&n))
-                    }))
+                    }));
                 }
                 (';', _) => {
                     self.offset += 1;
@@ -628,6 +676,14 @@ impl Iterator for Lexer<'_> {
                         TokenValue::Equal,
                     )));
                 }
+                ('!', Some('=')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Neq,
+                    )));
+                }
                 ('!', _) => {
                     self.offset += 1;
                     return Some(Ok(Token::new(
@@ -636,12 +692,36 @@ impl Iterator for Lexer<'_> {
                         TokenValue::Not,
                     )));
                 }
+                ('<', Some('=')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Lte,
+                    )));
+                }
                 ('<', _) => {
                     self.offset += 1;
                     return Some(Ok(Token::new(
                         start..self.offset,
                         self.file,
                         TokenValue::Lt,
+                    )));
+                }
+                ('>', Some('=')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Gte,
+                    )));
+                }
+                ('>', _) => {
+                    self.offset += 1;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::Gt,
                     )));
                 }
                 ('%', _) => {
@@ -653,17 +733,15 @@ impl Iterator for Lexer<'_> {
                     )));
                 }
                 ('"', _) => {
-                    return Some(
-                        self.take_strlit().map(|n| {
-                            Token::new(start..self.offset, self.file, TokenValue::StrLit(n))
-                        }),
-                    )
+                    return Some(self.take_strlit().map(|n| {
+                        Token::new(start..self.offset, self.file, TokenValue::StrLit(n))
+                    }));
                 }
                 (c, _) => {
                     return Some(Err(LexError::UnexpectedCharacter {
                         span: (start..self.offset + 1).into(),
                         found: c,
-                    }))
+                    }));
                 }
             }
         }

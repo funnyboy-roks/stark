@@ -7,23 +7,26 @@ extern fn calloc(u64 u64) -> (*i8);
 extern fn free(*i8);
 extern fn fread(*i8 u64 u64 *i8) -> (u64);
 
-/* File to read */ c"./text"
+fn main {
+    // FILE *i8 bytes
 
-c"rb" swap fopen
-32 u64 1 u64 calloc
-while 1 bool {
-    dup2
-    31 u64 swap
-    1 u64 swap
-    fread
+    /* File to read */ c"./text"
 
-    dup2 c"%.*s" printf(3)
+    c"rb" swap fopen
+    32 1 calloc
+    while true {
+        dup2
+        31 swap
+        1 swap
+        fread
 
-    31 u64 < then {
-        break
+        dup2 c"%.*s" printf(3)
+
+        31 < then {
+            break
+        }
     }
+
+    free
+    fclose
 }
-
-free
-fclose
-
