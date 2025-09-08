@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write};
+use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write, ops::DerefMut};
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     hash_float::FloatExt,
     ir::{
-        Builtin, ConvertedFunction, Ir, IrGenError, IrKind, Module, ThenIr, Type, TypeStack,
+        Builtin, Cast, ConvertedFunction, Ir, IrGenError, IrKind, Module, ThenIr, Type, TypeStack,
         WhileIr,
     },
     parse::Ident,
@@ -198,6 +198,30 @@ impl Type {
             Type::Bool => ArgumentDest::Register,
         }
     }
+
+    fn pop_as(
+        &self,
+        writer: &mut impl Write,
+        register: Register,
+        target: &Self,
+    ) -> Result<(), CodeGenError> {
+        if !self.is_integer() {
+            todo!("Type::pop_as for non-integer");
+        }
+
+        writeln!(writer, "    popq {}", register.for_size(8))?;
+        if self.size() < target.size() {
+            writeln!(
+                writer,
+                "    {} {}, {}",
+                if target.is_signed() { "movsx" } else { "movzx" },
+                register.for_size(8),
+                register.for_size(self.size())
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -248,11 +272,7 @@ impl DataItems {
 
 impl Type {
     pub fn drop<W: Write>(&self, writer: &mut W) -> Result<(), CodeGenError> {
-        if self.is_float() {
-            writeln!(writer, "    add rsp, 4")?;
-        } else {
-            writeln!(writer, "    add rsp, {}", self.padded_size())?;
-        }
+        writeln!(writer, "    add rsp, {}", self.padded_size())?;
         Ok(())
     }
 }
@@ -267,11 +287,11 @@ impl Builtin {
         macro_rules! compare {
             ($first: ident, $second: ident) => {
                 if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
                     writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+4]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 8")?;
+                    writeln!(writer, "    movss {}, [rsp+8]", FloatRegister::Xmm1)?;
+                    writeln!(writer, "    add rsp, 16")?;
                     writeln!(
                         writer,
                         "    comiss {}, {}",
@@ -295,17 +315,17 @@ impl Builtin {
         match self {
             Builtin::Add => {
                 if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
                     // equiv to:
                     //     movss xmm0, [rsp]
-                    //     movss xmm1, [rsp+4]
+                    //     movss xmm1, [rsp+8]
                     //     add rsp, 8
                     //     addss xmm1, xmm0
-                    //     sub rsp, 4
+                    //     sub rsp, 8
                     //     movss [rsp], xmm1
                     writeln!(writer, "    movss xmm0, [rsp]")?;
-                    writeln!(writer, "    add rsp, 4")?;
+                    writeln!(writer, "    add rsp, 8")?;
                     writeln!(writer, "    addss xmm0, [rsp]")?;
                     writeln!(writer, "    movss [rsp], xmm0")?;
                 } else {
@@ -323,18 +343,18 @@ impl Builtin {
             }
             Builtin::Sub => {
                 if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
                     // equiv to:
                     //     movss xmm0, [rsp]
-                    //     movss xmm1, [rsp+4]
+                    //     movss xmm1, [rsp+8]
                     //     add rsp, 8
                     //     subss xmm1, xmm0
-                    //     sub rsp, 4
+                    //     sub rsp, 8
                     //     movss [rsp], xmm1
-                    writeln!(writer, "    movss xmm1, [rsp+4]")?;
+                    writeln!(writer, "    movss xmm1, [rsp+8]")?;
                     writeln!(writer, "    subss xmm1, [rsp]")?;
-                    writeln!(writer, "    add rsp, 4")?;
+                    writeln!(writer, "    add rsp, 8")?;
                     writeln!(writer, "    movss [rsp], xmm1")?;
                 } else {
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
@@ -347,21 +367,21 @@ impl Builtin {
             Builtin::Mul => {
                 let ty = &type_stack[len - 1];
                 if ty.is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 4);
-                    assert_eq!(type_stack[len - 2].padded_size(), 4);
+                    assert_eq!(type_stack[len - 1].padded_size(), 8);
+                    assert_eq!(type_stack[len - 2].padded_size(), 8);
                     // equiv to:
                     //     movss xmm0, [rsp]
-                    //     movss xmm1, [rsp+4]
+                    //     movss xmm1, [rsp+8]
                     //     add rsp, 8
                     //     mulss xmm1, xmm0
-                    //     sub rsp, 4
+                    //     sub rsp, 8
                     //     movss [rsp], xmm1
-                    // writeln!(writer, "    movss xmm1, [rsp+4]")?;
+                    // writeln!(writer, "    movss xmm1, [rsp+8]")?;
                     // writeln!(writer, "    mulss xmm1, [rsp]")?;
-                    // writeln!(writer, "    add rsp, 4")?;
+                    // writeln!(writer, "    add rsp, 8")?;
                     // writeln!(writer, "    movss [rsp], xmm1")?;
                     writeln!(writer, "    movss xmm0, [rsp]")?;
-                    writeln!(writer, "    add rsp, 4")?;
+                    writeln!(writer, "    add rsp, 8")?;
                     writeln!(writer, "    mulss xmm0, [rsp]")?;
                     writeln!(writer, "    movss [rsp], xmm0")?;
                 } else {
@@ -509,6 +529,129 @@ impl Builtin {
     }
 }
 
+impl Cast {
+    pub fn compile_to<W: Write>(
+        self,
+        writer: &mut W,
+        type_stack: &mut TypeStack,
+    ) -> Result<(), CodeGenError> {
+        let src = type_stack.pop(self.span)?;
+        writeln!(writer, "    ; cast {} -> {}", src, self.target)?;
+        match self.target {
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Integer => {
+                if src.is_integer() {
+                    // in C, `(unsigned int)((char) -1)` is `(unsigned int)((int) -1)` instead of the `255` that I'd expect...
+                    // but, let's be consistent with that
+                    src.pop_as(writer, Register::Rax, &self.target)?;
+                    writeln!(writer, "    pushq rax")?;
+                } else if src.is_float() {
+                    match src {
+                        Type::F32 => {
+                            writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(
+                                writer,
+                                "    cvtss2si {}, {}",
+                                Register::Rax.for_size(4),
+                                FloatRegister::Xmm0
+                            )?;
+                        }
+                        Type::F64 | Type::Float => {
+                            writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(
+                                writer,
+                                "    cvtsd2si {}, {}",
+                                Register::Rax.for_size(4),
+                                FloatRegister::Xmm0
+                            )?;
+                        }
+                        _ => unreachable!(),
+                    }
+                    if self.target.size() != 4 {
+                        writeln!(
+                            writer,
+                            "    movsx {}, {}",
+                            Register::Rax.for_size(self.target.size()),
+                            Register::Rax.for_size(4),
+                        )?;
+                    }
+                    writeln!(writer, "    pushq rax")?;
+                }
+            }
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+                if src.is_integer() {
+                    // in C, `(unsigned int)((char) -1)` is `(unsigned int)((int) -1)` instead of the `255` that I'd expect...
+                    // but, let's be consistent with that
+                    src.pop_as(writer, Register::Rax, &self.target)?;
+                    writeln!(writer, "    pushq rax")?;
+                } else if src.is_float() {
+                    match src {
+                        Type::F32 => {
+                            writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(
+                                writer,
+                                "    cvtss2si {}, {}",
+                                Register::Rax.for_size(4),
+                                FloatRegister::Xmm0
+                            )?;
+                            writeln!(writer, "    pushq rax")?;
+                        }
+                        Type::F64 | Type::Float => todo!("i_ => f64"),
+                        _ => unreachable!(),
+                    }
+                    if self.target.size() > src.size() {
+                        writeln!(
+                            writer,
+                            "    movsx {}, {}",
+                            Register::Rax.for_size(self.target.size()),
+                            Register::Rax.for_size(4),
+                        )?;
+                    }
+                }
+            }
+            Type::F32 => {
+                if src.is_integer() {
+                    // TODO: I64 -> f32 how?
+                    src.pop_as(writer, Register::Rax, &Type::I32)?;
+                    writeln!(
+                        writer,
+                        "    cvtsi2ss {}, {}",
+                        FloatRegister::Xmm0,
+                        Register::Rax.for_size(4)
+                    )?;
+                    writeln!(writer, "    sub rsp, 8")?;
+                    writeln!(writer, "    movss [rsp], xmm0")?;
+                } else if src.is_float() {
+                    match src {
+                        Type::F32 => { /* nop */ }
+                        Type::F64 => {
+                            writeln!(writer, "cvtss2sd xmm0, [rsp]")?;
+                            writeln!(writer, "movsd [rsp], xmm0")?;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            Type::F64 => todo!(),
+            Type::Float => { /* nop */ }
+            Type::Pointer(_) => { /* nop */ }
+            Type::FatPointer => todo!(),
+            Type::Struct => todo!(),
+            Type::Bool => {
+                write!(writer, "    pop rax")?;
+                write!(writer, "    cmp rax, 0")?;
+                write!(writer, "    setne al")?;
+                write!(writer, "    movzx rax, al")?;
+                write!(writer, "    pushq rax")?;
+            }
+        }
+        type_stack.push(self.target.clone());
+        Ok(())
+    }
+}
+
 #[derive(Debug, Error, Diagnostic)]
 pub enum CodeGenError {
     #[error(transparent)]
@@ -641,42 +784,96 @@ impl<W: Write> CodeGen<W> {
             writeln!(self.writer, "    push rbp")?;
             writeln!(self.writer, "    mov rbp, rsp")?;
         } else {
+            let mut floati = func.args.iter().filter(|t| t.is_float()).count();
+            let mut regi = func
+                .args
+                .iter()
+                .filter(|t| !t.is_float() && t.size() <= 8)
+                .count();
+            if floati >= FloatRegister::ARG_REGS.len()
+                || regi >= Register::ARG_REGS.len()
+                || floati + regi != func.args.len()
+            {
+                todo!("extra values on the stack");
+            }
+            for x in func.args.iter().rev() {
+                if x.is_float() {
+                    writeln!(self.writer, "    sub rsp, {}", x.padded_size())?;
+                    writeln!(
+                        self.writer,
+                        "    movss [rsp], {}",
+                        FloatRegister::ARG_REGS[floati]
+                    )?;
+                    floati -= 1;
+                } else if x.size() <= 8 {
+                    writeln!(
+                        self.writer,
+                        "    mov [rsp], {}",
+                        Register::ARG_REGS[regi].for_size(8)
+                    )?;
+                    regi -= 1;
+                }
+            }
             // writeln!(self.writer, "    push rbp")?;
             // writeln!(self.writer, "    mov rbp, rsp")?;
-            writeln!(self.writer, "    mov rax, [rsp]")?; // save the return pointer
-            writeln!(self.writer)?;
-            writeln!(self.writer, "    mov rdi, rsp")?; // rdi is the destination for the `movsq` instruction
-            writeln!(self.writer, "    mov rsi, rsp")?; // rsi is the source for the `movsq` instruction
-            writeln!(self.writer, "    add rsi, 8")?; // rsi+8 to shift everything down
-            writeln!(self.writer)?;
-            writeln!(self.writer, "    mov rcx, {}", func.args.len())?; // repeat for each arg
-            writeln!(self.writer, "    cld")?; // clear direction flag so `rep` increments
-            writeln!(self.writer, "    rep movsq")?;
-            // save the return address on the bottom of the stack
-            writeln!(self.writer, "    mov [rsp+{}], rax", func.args.len() * 8)?;
+
+            // writeln!(self.writer, "    mov rax, [rsp]")?; // save the return pointer
+            // writeln!(self.writer)?;
+            // writeln!(self.writer, "    mov rdi, rsp")?; // rdi is the destination for the `movsq` instruction
+            // writeln!(self.writer, "    mov rsi, rsp")?; // rsi is the source for the `movsq` instruction
+            // writeln!(self.writer, "    add rsi, 8")?; // rsi+8 to shift everything down
+            // writeln!(self.writer)?;
+            // writeln!(self.writer, "    mov rcx, {}", func.args.len())?; // repeat for each arg
+            // writeln!(self.writer, "    cld")?; // clear direction flag so `rep` increments
+            // writeln!(self.writer, "    rep movsq")?;
+            // // save the return address on the bottom of the stack
+            // writeln!(self.writer, "    mov [rsp+{}], rax", func.args.len() * 8)?;
         }
 
-        let returns_len = func.returns.len();
+        let name = f.name.clone();
         self.compile_body(f.body)?;
+        let func = &self.module.functions[&name];
 
         if is_main {
             writeln!(self.writer, "    mov rax, 0")?;
             writeln!(self.writer, "    pop rbp")?;
         }
 
-        if returns_len != 0 {
-            writeln!(self.writer, "    mov rax, [rsp+{}]", returns_len * 8)?; // get the return address from the bottom of the stack
+        let mut returns = func.returns.clone();
+        if let Some(top) = returns.deref_mut().pop() {
+            if top.is_float() {
+                if top == Type::F32 {
+                    writeln!(self.writer, "    movss xmm0, [rsp]")?;
+                    writeln!(self.writer, "    add rsp, 8")?;
+                } else {
+                    writeln!(self.writer, "    movsd xmm0")?;
+                    writeln!(self.writer, "    add rsp, 8")?;
+                }
+            } else if top.size() <= 8 {
+                writeln!(self.writer, "    popq rax")?;
+            } else {
+                todo!("extra values on the stack");
+            }
+        }
+
+        if !returns.is_empty() {
+            writeln!(self.writer)?;
+            writeln!(
+                self.writer,
+                "    mov r8, [rsp+{}]",
+                returns.iter().map(|t| t.padded_size()).sum::<u32>()
+            )?; // get the return address from the bottom of the stack
             writeln!(self.writer)?;
             writeln!(self.writer, "    mov rsi, rsp")?;
-            writeln!(self.writer, "    add rsi, {}", (returns_len - 1) * 8)?;
+            writeln!(self.writer, "    add rsi, {}", (returns.len() - 1) * 8)?;
             writeln!(self.writer, "    mov rdi, rsp")?;
-            writeln!(self.writer, "    add rdi, {}", returns_len * 8)?;
+            writeln!(self.writer, "    add rdi, {}", returns.len() * 8)?;
             writeln!(self.writer)?;
             writeln!(self.writer, "    std")?; // set direction flag so `rep` decrements
-            writeln!(self.writer, "    mov rcx, {}", returns_len)?;
+            writeln!(self.writer, "    mov rcx, {}", returns.len())?;
             writeln!(self.writer, "    rep movsq")?;
             writeln!(self.writer)?;
-            writeln!(self.writer, "    mov [rsp], rax")?;
+            writeln!(self.writer, "    mov [rsp], r8")?;
         }
 
         writeln!(self.writer, "    ret")?;
@@ -703,7 +900,7 @@ impl<W: Write> CodeGen<W> {
                 let label = self.data.add_float(f);
                 self.type_stack.push(ty!(Float));
                 writeln!(self.writer, "    movss xmm0, [{}]", label)?;
-                writeln!(self.writer, "    sub rsp, 4")?;
+                writeln!(self.writer, "    sub rsp, 8")?;
                 writeln!(self.writer, "    movss [rsp], xmm0")?;
             }
             IrKind::PushBool(b) => {
@@ -737,7 +934,9 @@ impl<W: Write> CodeGen<W> {
             IrKind::Break(id) => {
                 writeln!(self.writer, "    jmp .{}_break", id)?;
             }
-            IrKind::Cast(_) => nyi!(ir.span, "casting"),
+            IrKind::Cast(cast) => {
+                cast.compile_to(&mut self.writer, &mut self.type_stack)?;
+            }
         }
         Ok(())
     }
@@ -824,7 +1023,7 @@ impl<W: Write> CodeGen<W> {
     fn compile_function_call(&mut self, ident: Ident) -> Result<(), CodeGenError> {
         let f = &self.module.functions[&ident.ident];
 
-        if f.external {
+        if true || f.external {
             let mut register_i = 0;
             let mut float_i = 0;
             let mut argi = 0;
@@ -847,7 +1046,7 @@ impl<W: Write> CodeGen<W> {
                         let dest = FloatRegister::ARG_REGS[float_i];
                         writeln!(self.writer, "    pxor {0}, {0}", dest)?;
                         writeln!(self.writer, "    cvtss2sd {}, [rsp]", dest)?;
-                        writeln!(self.writer, "    add rsp, 4")?;
+                        writeln!(self.writer, "    add rsp, 8")?;
                         float_i += 1;
                     }
                     ArgumentDest::FloatRegister => todo!("overflow on stack"),
@@ -856,7 +1055,7 @@ impl<W: Write> CodeGen<W> {
 
             self.type_stack.extend_from_slice(&f.returns);
             // TODO: What should go in rax?
-            writeln!(self.writer, "    mov rax, {}", 0)?;
+            writeln!(self.writer, "    mov rax, {}", float_i)?;
             writeln!(self.writer, "    call {}", f.linker_name)?;
 
             // Push first argument back onto the stack
@@ -866,7 +1065,7 @@ impl<W: Write> CodeGen<W> {
                     ArgumentDest::Stack => todo!(),
                     ArgumentDest::FloatRegister => {
                         assert_eq!(*ret, ty!(f32));
-                        writeln!(self.writer, "    sub rsp, 4")?;
+                        writeln!(self.writer, "    sub rsp, 8")?;
                         writeln!(self.writer, "    movss [rsp], xmm0")?;
                     }
                 }

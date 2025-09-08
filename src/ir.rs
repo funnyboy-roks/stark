@@ -166,7 +166,7 @@ impl Type {
             Type::I8 | Type::U8 | Type::Bool => 8,
             Type::I16 | Type::U16 => 8,
             Type::I32 | Type::U32 => 8,
-            Type::F32 | Type::Float => 4, // TODO: Confirm
+            Type::F32 | Type::Float => 8,
             Type::I64 | Type::U64 | Type::F64 => 8,
             Type::Integer => 8,    // assume [ui]64
             Type::Pointer(_) => 8, // TODO: platform pointer size
@@ -650,7 +650,7 @@ impl Type {
                 !target.is_unresolved()
                     && (target.is_integer() || target.is_float() || *target == Type::Bool)
             }
-            Type::Pointer(_) => matches!(target, Type::U64),
+            Type::Pointer(_) => matches!(target, Type::U64 | Type::Pointer(_)), // pointer case not caught if inner type not equal
             Type::FatPointer => todo!(),
             Type::Struct => todo!(),
             Type::Bool => !target.is_unresolved() && target.is_integer(),
@@ -1026,18 +1026,21 @@ pub struct ThenIr {
 }
 
 #[derive(Debug, Clone)]
-pub struct Cast(Type);
+pub struct Cast {
+    pub target: Type,
+    pub span: SourceSpan,
+}
 
 impl Cast {
     pub fn apply(&self, mut ir: Ir, ir_stack: &mut Vec<Ir>) -> Result<(), IrGenError> {
         match ir.kind {
             IrKind::PushInt(ref mut n) => {
-                if self.0.is_integer() {
-                    *n %= 2u32.pow(8 * self.0.size()) as i128;
+                if self.target.is_integer() {
+                    *n %= 2u32.pow(8 * self.target.size()) as i128;
                     ir_stack.push(ir);
-                } else if self.0 == Type::Bool {
+                } else if self.target == Type::Bool {
                     ir_stack.push(Ir::new(ir.span, IrKind::PushBool(*n != 0)));
-                } else if self.0.is_float() {
+                } else if self.target.is_float() {
                     let f = *n as f64;
                     ir_stack.push(Ir::new(ir.span, IrKind::PushFloat(f)));
                 } else {
@@ -1045,10 +1048,10 @@ impl Cast {
                 }
             }
             IrKind::PushFloat(f) => {
-                if self.0.is_integer() {
-                    let n = f as i128 % 2u32.pow(8 * self.0.size()) as i128;
+                if self.target.is_integer() {
+                    let n = f as i128 % 2u32.pow(8 * self.target.size()) as i128;
                     ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n)));
-                } else if self.0.is_float() {
+                } else if self.target.is_float() {
                     // nop
                     ir_stack.push(ir);
                 } else {
@@ -1056,7 +1059,7 @@ impl Cast {
                 }
             }
             IrKind::PushBool(_) => {
-                assert_eq!(self.0, Type::Bool);
+                assert_eq!(self.target, Type::Bool);
                 ir_stack.push(ir);
             }
             IrKind::PushCStr(_) => todo!(),
@@ -1067,14 +1070,10 @@ impl Cast {
         Ok(())
     }
 
-    pub fn type_check(
-        &self,
-        span: SourceSpan,
-        type_stack: &mut TypeStack,
-    ) -> Result<(), IrGenError> {
-        let ty = type_stack.pop(span)?;
-        ty.cast_into(span, &self.0)?;
-        type_stack.push(self.0.clone());
+    pub fn type_check(&self, type_stack: &mut TypeStack) -> Result<(), IrGenError> {
+        let ty = type_stack.pop(self.span)?;
+        ty.cast_into(self.span, &self.target)?;
+        type_stack.push(self.target.clone());
         Ok(())
     }
 }
@@ -1657,8 +1656,11 @@ impl Module {
                 ));
             }
             Ast::Cast(c) => {
-                let x = Cast(Type::from_atom(&c.target).expect("TODO: type errors"));
-                x.type_check(c.span(), type_stack)?;
+                let x = Cast {
+                    target: Type::from_atom(&c.target).expect("TODO: type errors"),
+                    span: c.span(),
+                };
+                x.type_check(type_stack)?;
                 out.push(Ir::new(c.span(), IrKind::Cast(x)));
             }
         }
@@ -1861,10 +1863,10 @@ pub fn update_stacks(
         }
         IrKind::Cast(ref c) => {
             if let Some(ir) = ir_stack.pop_if(|x| x.kind.is_const()) {
-                c.type_check(ir.span, type_stack)?;
+                c.type_check(type_stack)?;
                 c.apply(ir, ir_stack)?;
             } else {
-                c.type_check(ir.span, type_stack)?;
+                c.type_check(type_stack)?;
                 ir_stack.push(ir);
             }
         }
