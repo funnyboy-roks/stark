@@ -1178,7 +1178,7 @@ pub struct FunctionSignature {
 
 impl FunctionSignature {
     pub fn apply(&self, ident: &Ident, type_stack: &mut TypeStack) -> Result<(), IrGenError> {
-        if let Some(len) = ident.len {
+        if let Some(len) = ident.arity {
             if self.variadic && (len as usize) < self.args.len() {
                 return Err(IrGenError::IncorrectExplicitVariadicArgSize {
                     expected: self.args.len(),
@@ -1197,7 +1197,7 @@ impl FunctionSignature {
             // TODO: error for all args at the same time
             type_stack.pop_type(ident.span, expected)?;
         }
-        if let Some(len) = ident.len
+        if let Some(len) = ident.arity
             && len as usize > self.args.len()
             && self.variadic
         {

@@ -1084,7 +1084,7 @@ impl<W: Write> CodeGen<W> {
         let mut register_i = 0;
         let mut float_i = 0;
         let mut argi = 0;
-        for _ in 0..ident.len.map(|x| x as usize).unwrap_or(f.args.len()) {
+        for _ in 0..ident.arity.map(|x| x as usize).unwrap_or(f.args.len()) {
             let ty = self.type_stack.pop(ident.span)?;
             if argi < f.args.len() {
                 assert!(

@@ -22,7 +22,7 @@ pub trait Spanned {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ident {
     pub ident: String,
-    pub len: Option<u32>,
+    pub arity: Option<u32>,
     pub span: SourceSpan,
 }
 
@@ -620,7 +620,7 @@ impl<'a> Parser<'a> {
                         if x.kind() != TokenKind::LParen {
                             out.push(Ast::Ident(Ident {
                                 ident: s,
-                                len: None,
+                                arity: None,
                                 span: token.span,
                             }));
                             break 'x;
@@ -643,7 +643,7 @@ impl<'a> Parser<'a> {
 
                     out.push(Ast::Ident(Ident {
                         ident: s,
-                        len: Some(n as u32),
+                        arity: Some(n as u32),
                         span: (token.span.offset()..rparen.span.offset() + rparen.span.len())
                             .into(),
                     }));
@@ -793,7 +793,7 @@ impl<'a> Parser<'a> {
                         if x.kind() != TokenKind::LParen {
                             out.push(Ast::Ident(Ident {
                                 ident,
-                                len: None,
+                                arity: None,
                                 span: token.span,
                             }));
                             break 'x;
@@ -801,7 +801,7 @@ impl<'a> Parser<'a> {
                     } else {
                         out.push(Ast::Ident(Ident {
                             ident,
-                            len: None,
+                            arity: None,
                             span: token.span,
                         }));
                         break 'x;
@@ -823,7 +823,7 @@ impl<'a> Parser<'a> {
 
                     out.push(Ast::Ident(Ident {
                         ident,
-                        len: Some(n as u32),
+                        arity: Some(n as u32),
                         span: (token.span.offset()..rparen.span.offset() + rparen.span.len())
                             .into(),
                     }));

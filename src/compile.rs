@@ -827,23 +827,23 @@ where
 
     fn call_extern_fn(
         &mut self,
-        Ident { len, span, .. }: &Ident,
+        Ident { arity, span, .. }: &Ident,
         ext: ExternFn,
     ) -> Result<(), CompileError> {
-        let len = len.unwrap_or(ext.args.len() as u32);
-        if (ext.variadic && (len as usize) < ext.args.len())
-            || (!ext.variadic && ext.args.len() != len as usize)
+        let arity = arity.unwrap_or(ext.args.len() as u32);
+        if (ext.variadic && (arity as usize) < ext.args.len())
+            || (!ext.variadic && ext.args.len() != arity as usize)
         {
             if ext.variadic {
                 return Err(CompileError::IncorrectExplicitVariadicArgSize {
                     expected: ext.args.len(),
-                    actual: len as usize,
+                    actual: arity as usize,
                     span: *span,
                 });
             } else {
                 return Err(CompileError::IncorrectExplicitArgSize {
                     expected: ext.args.len(),
-                    actual: len as usize,
+                    actual: arity as usize,
                     span: *span,
                 });
             }
@@ -852,7 +852,7 @@ where
         let mut inti = 0;
         let mut flti = 0;
         let mut n: usize = 0;
-        while n < len as usize {
+        while n < arity as usize {
             if let (Some(r), Some(f)) = (
                 Register::ARG_REGS.get(inti),
                 FloatRegister::ARG_REGS.get(flti),
@@ -877,7 +877,7 @@ where
         }
 
         let var_types =
-            &self.type_stack[self.type_stack.len() - (len as usize).saturating_sub(n)..];
+            &self.type_stack[self.type_stack.len() - (arity as usize).saturating_sub(n)..];
 
         writeln!(self.out, "    mov rax, 0")?;
         writeln!(self.out, "    call {}", ext.linker_name)?;
@@ -898,17 +898,17 @@ where
         Ok(())
     }
 
-    fn call_fn(&mut self, Ident { len, span, .. }: &Ident, f: Fn) -> Result<(), CompileError> {
-        let len = len.unwrap_or(f.args.len() as u32);
-        if f.args.len() != len as usize {
+    fn call_fn(&mut self, Ident { arity, span, .. }: &Ident, f: Fn) -> Result<(), CompileError> {
+        let arity = arity.unwrap_or(f.args.len() as u32);
+        if f.args.len() != arity as usize {
             return Err(CompileError::IncorrectExplicitArgSize {
                 expected: f.args.len(),
-                actual: len as usize,
+                actual: arity as usize,
                 span: *span,
             });
         }
 
-        for i in 0..len as usize {
+        for i in 0..arity as usize {
             // TODO: use linux calling convention
             self.pop_type(*span, Type::from_atom(&f.args[i]).expect("TODO"))?;
             //if let Some(r) = Register::ARG_REGS.get(i) {
