@@ -18,5 +18,7 @@ jobs:
           submodules: true
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
+      - name: Install fasm
+        run: sudo apt -y install fasm
       - name: Run Tests
         run: 'cd tests && ./test.sh'

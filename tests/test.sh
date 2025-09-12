@@ -44,7 +44,7 @@ run() {
 record() {
     name=$(basename $1)
     echo "Recording '$name'"
-    build $1 |& awk "{ print \"[Compile '$name'] \" \$0 }"
+    build $1 2>&1 | awk "{ print \"[Compile '$name'] \" \$0 }"
     run $1 > ./$name-out.txt
 }
 
