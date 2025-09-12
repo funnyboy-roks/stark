@@ -233,6 +233,13 @@ pub enum LexError {
         span: SourceSpan,
         found: char,
     },
+    #[error("Unexpected char '{found}', expected one of {expected:?}.")]
+    UnexpectedCharacterExpected {
+        #[label = "here"]
+        span: SourceSpan,
+        expected: Vec<char>,
+        found: char,
+    },
     #[error("Unexpected end of file")]
     UnexpectedEof {
         #[label = "here"]
@@ -443,26 +450,38 @@ impl<'a> Lexer<'a> {
                     }
                     escaping = false;
                 }
+                // TODO: support \0{33}
                 '0' if escaping => {
                     let mut s = String::with_capacity(3);
-                    if let Some(a @ ('0'..='7')) = content.next() {
-                        s.push(a);
-                        end += a.len_utf8();
-                    } else {
-                        todo!("invalid escape")
-                    };
-                    if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
-                        s.push(a);
-                        end += a.len_utf8();
-                    }
-                    if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
-                        s.push(a);
-                        end += a.len_utf8();
+                    for _ in 0..3 {
+                        if let Some(a) = content.next_if(|c| matches!(c, '0'..='7')) {
+                            s.push(a);
+                            end += a.len_utf8();
+                        } else {
+                            break;
+                        }
                     }
                     owned
                         .as_mut()
                         .unwrap()
                         .push(char::from(u8::from_str_radix(&s, 8).expect("TODO")));
+                    escaping = false;
+                }
+                // TODO: support \x{1b}
+                'x' if escaping => {
+                    let mut s = String::with_capacity(2);
+                    for _ in 0..2 {
+                        if let Some(a) = content.next_if(|c| c.is_ascii_hexdigit()) {
+                            s.push(a);
+                            end += a.len_utf8();
+                        } else {
+                            break;
+                        }
+                    }
+                    owned
+                        .as_mut()
+                        .unwrap()
+                        .push(char::from(u8::from_str_radix(&s, 16).expect("TODO")));
                     escaping = false;
                 }
                 c => {

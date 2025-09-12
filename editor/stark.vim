@@ -32,7 +32,7 @@ syntax keyword Todo contained TODO FIXME XXX NOTE
 syntax region starkBlockComment start=/\/\*/ end=/\*\// contains=Todo
 syntax region starkLineComment start=/\/\// end=/$/ contains=Todo
 
-syntax match starkSpecialChar contained /\\\([^0]\|0[0-9]\{1,3\}\)/
+syntax match starkSpecialChar contained /\\\(0[0-9]\{1,3\}\|x[0-9a-fA-F]\{1,2\}\|.\)/
 syntax region starkString start=/c\?"/ end=/"/ contains=starkSpecialChar
 
 syntax match starkLabel /'[a-zA-Z0-9_]\+/

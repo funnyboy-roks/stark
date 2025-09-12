@@ -3,9 +3,9 @@ extern fn printf(*i8 ...);
 fn blackbox {}
 fn assert(*i8 bool) {
     swap then {
-        c"Assertion succeeded: %s  \033[32m✔️\033[0m\n" printf(2)
-    } else {                                         
-        c"Assertion failed:    %s  \033[31m❌\033[0m\n" printf(2)
+        c"Assertion succeeded: %s  \x1b[32m✔️\x1b[0m\n" printf(2)
+    } else {
+        c"Assertion failed:    %s  \x1b[31m❌\x1b[0m\n" printf(2)
     }
 }
 
