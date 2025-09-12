@@ -13,7 +13,9 @@ fn fizzbuzz(i64) -> () {
     drop
 }
 
-0 while dup 50 = ! {
-    dup fizzbuzz
-    1 +
-} drop
+fn main {
+    0 while dup 50 = ! {
+        dup fizzbuzz
+        1 +
+    } drop
+}

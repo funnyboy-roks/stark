@@ -1,0 +1,104 @@
+STDOUT:
+    [33mInteger -> Float:[0m
+    Assertion succeeded: 42        cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42        cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i8)    cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i8)    cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u8)    cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u8)    cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i16)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i16)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u16)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u16)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i32)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i32)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u32)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u32)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i64)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i64)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u64)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u64)   cast(f64)  == 42.0   [32m✔️[0m
+    [33mFloat -> Integer:[0m
+    Assertion succeeded: 3.14      cast(i8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(i16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(i32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(i64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u64)  == 3      [32m✔️[0m
+    [33mInteger <-> Bool:[0m
+    Assertion succeeded: 1         cast(bool) == true   [32m✔️[0m
+    Assertion succeeded: 0         cast(bool) == false  [32m✔️[0m
+    Assertion succeeded: true      cast(i32)  == 1      [32m✔️[0m
+    Assertion succeeded: false     cast(i32)  == 0      [32m✔️[0m
+    [33mInteger -> Float (without blackbox):[0m
+    Assertion succeeded: 42        cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42        cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i8)    cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i8)    cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u8)    cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u8)    cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i16)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i16)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u16)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u16)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i32)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i32)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u32)   cast(f32)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u32)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i64)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(i64)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u64)   cast(f64)  == 42.0   [32m✔️[0m
+    Assertion succeeded: 42(u64)   cast(f64)  == 42.0   [32m✔️[0m
+    [33mFloat -> Integer (without blackbox):[0m
+    Assertion succeeded: 3.14      cast(i8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(i16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(i32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(i64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14      cast(u64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(i64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f32) cast(u64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u8)   == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u16)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u32)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(i64)  == 3      [32m✔️[0m
+    Assertion succeeded: 3.14(f64) cast(u64)  == 3      [32m✔️[0m
+    [33mInteger <-> Bool (without blackbox):[0m
+    Assertion succeeded: 1         cast(bool) == true   [32m✔️[0m
+    Assertion succeeded: 0         cast(bool) == false  [32m✔️[0m
+    Assertion succeeded: true      cast(i32)  == 1      [32m✔️[0m
+    Assertion succeeded: false     cast(i32)  == 0      [32m✔️[0m
+
+STDERR:
+
+
+STATUS: 0

@@ -2,8 +2,12 @@
 
 set -e
 
+GREEN='\033[32m'
+RED='\033[31m'
+RESET='\033[0m'
+
 fail() {
-    echo $1 >&2
+    echo -e $1 >&2
     exit 1
 }
 
@@ -11,15 +15,15 @@ build() {
     asm="$1.s"
     obj="$1.o"
 
-    cargo r -q -- -o "$asm" "$1.st"
+    cargo r -q -- --gen "$1.st" > "$asm"
     fasm "$asm" "$obj"
     gcc -no-pie -o "$1" "$obj"
 }
 
 run() {
     name=$(basename $1)
-    stdout=$(mktemp stark-test-$name-stdout.XXXXXXXXXX)
-    stderr=$(mktemp stark-test-$name-stderr.XXXXXXXXXX)
+    stdout=$(mktemp stark-test-$name-stdout.XXXXXXXXXX -t)
+    stderr=$(mktemp stark-test-$name-stderr.XXXXXXXXXX -t)
     ./$1 >$stdout 2>$stderr
     # STDOUT:
     # asdf
@@ -52,8 +56,11 @@ test_single() {
     run $1 > $tmp
     dif=$(diff $tmp ./$name-out.txt --color=always -u)
     diffst=$?
-    if [ $diffst -ne 0 ]; then
+    if [ $diffst -eq 0 ]; then
+        echo -e "[Testing '$name'] ${GREEN}Test passed! ✔️$RESET"
+    else
         echo "$dif" |& awk "{ print \"[Testing '$name'] \" \$0 }"
+        echo "[Testing '$name'] ${RED}Test failed! ❌$RESET"
         return 1
     fi
     return 0
@@ -72,10 +79,9 @@ test_all() {
         fi
     done
     if [ $count -ne 0 ]; then
-        echo "$count test failures"
-        exit 1
+        fail "${RED}$count test failures $RESET"
     else
-        echo "All Tests Passed!"
+        echo -e "${GREEN}All Tests Passed!$RESET"
     fi
 }
 

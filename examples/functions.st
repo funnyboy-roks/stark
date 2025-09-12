@@ -9,6 +9,8 @@ fn double(i64) -> (i64) {
     dup +
 }
 
-5 double c"5 * 2 = %d\n" printf(2) drop
-5 double double c"5 * 4 = %d\n" printf(2) drop
-5 quadruple c"5 * 4 = %d\n" printf(2) drop
+fn main {
+    5 double c"5 * 2 = %d\n" printf(2) drop
+    5 double double c"5 * 4 = %d\n" printf(2) drop
+    5 quadruple c"5 * 4 = %d\n" printf(2) drop
+}

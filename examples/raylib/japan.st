@@ -9,13 +9,15 @@ extern fn ClearBackground(u32);
 extern fn DrawCircle(i32 i32 f32 u32);
 extern fn CloseWindow;
 
-c"hello world" 600 i32 900 i32 InitWindow
+fn main {
+    c"hello world" 600 900 InitWindow
 
-while WindowShouldClose ! {
-    BeginDrawing
-        0xffffffff u32 ClearBackground
-        0xff3729e6 u32 200.0 300 i32 450 i32 DrawCircle
-    EndDrawing
+    while WindowShouldClose ! {
+        BeginDrawing
+            0xffffffff cast(u64) ClearBackground
+            0xff3729e6 200.0 300 450 DrawCircle
+        EndDrawing
+    }
+
+    CloseWindow
 }
-
-CloseWindow
