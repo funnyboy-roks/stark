@@ -13,25 +13,6 @@ use crate::{
     ty,
 };
 
-const FASM_SYMBOLS: phf::Set<&'static str> = phf::phf_set! {
-    "and", "area", "arrange", "as", "assemble", "assert", "at", "bappend", "binary", "break",
-    "bsf", "bsr", "bswap", "byte", "call", "calminstruction", "check", "combinelines", "compute",
-    "db", "dbx", "dd", "ddq", "ddqq", "define", "defined", "definite", "display", "dp", "dq",
-    "dqq", "dqqword", "dqword", "dt", "dup", "dw", "dword", "element", "elementof", "elementsof",
-    "else", "emit", "end", "eq", "eqtype", "equ", "err", "esc", "eval", "executable", "exit",
-    "expression", "__file__", "file", "float", "format", "from", "fword", "if", "include", "indx",
-    "irp", "irpv", "isolatelines", "iterate", "jno", "jump", "jyes", "label", "lengthof",
-    "__line__", "load", "local", "macro", "match", "metadata", "metadataof", "mod", "mvmacro",
-    "mvstruc", "name", "namespace", "not", "number", "or", "org", "outscope", "postpone",
-    "priorequ", "priormacro", "priorstruc", "publish", "purge", "pword", "qqword", "quoted",
-    "qword", "rawmatch", "rb", "rd", "rdq", "rdqq", "redefine", "reequ", "relativeto",
-    "removecomments", "repeat", "rept", "restartout", "restore", "restruc", "retaincomments",
-    "rmatch", "rp", "rq", "rqq", "rt", "rw", "scale", "scaleof", "section", "shl", "shr", "sizeof",
-    "__source__", "store", "string", "stringify", "struc", "take", "taketext", "tbyte", "__time__",
-    "transform", "trunc", "tword", "used", "virtual", "while", "word", "xor", "xword", "yword",
-    "zword"
-};
-
 /// Docs from https://wiki.osdev.org/CPU_Registers_x86-64#General_Purpose_Registers
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum Register {
@@ -251,7 +232,7 @@ impl DataItems {
 
     pub fn write(&self, mut out: impl Write) -> Result<(), CodeGenError> {
         for (s, n) in &self.bytes {
-            writeln!(out, "bytes_{}:", n)?;
+            writeln!(out, "bytes_{}: ; {:?}", n, String::from_utf8_lossy(s))?;
             write!(out, "    db ")?;
             for (i, c) in s.iter().enumerate() {
                 if i > 0 {
@@ -264,7 +245,7 @@ impl DataItems {
 
         for (f, n) in &self.floats {
             writeln!(out, "float_{}:", n)?;
-            writeln!(out, "    dd {:?}", **f)?;
+            writeln!(out, "    dq {:?}", **f)?;
         }
         Ok(())
     }
@@ -287,21 +268,55 @@ impl Builtin {
         macro_rules! compare {
             ($first: ident, $second: ident) => {
                 if type_stack[len - 1].is_float() {
-                    assert_eq!(type_stack[len - 1].padded_size(), 8);
-                    assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                    writeln!(writer, "    movss {}, [rsp+8]", FloatRegister::Xmm1)?;
-                    writeln!(writer, "    add rsp, 16")?;
-                    writeln!(
-                        writer,
-                        "    comiss {}, {}",
-                        compare!(@f $first),
-                        compare!(@f $second),
-                    )?;
+                    let top = &type_stack[len - 1];
+                    let bottom = &type_stack[len - 2];
+                    assert_eq!(top.padded_size(), 8);
+                    assert_eq!(bottom.padded_size(), 8);
+                    let infer_one = top.is_unresolved() || bottom.is_unresolved();
+                    let size = top.size().min(bottom.size());
+                    if infer_one || top.size() == bottom.size() {
+                        let infer_bottom = bottom.is_unresolved();
+                        if size == 4 {
+                            if infer_one {
+                                if infer_bottom {
+                                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    cvtsd2ss {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                } else {
+                                    writeln!(writer, "    cvtsd2ss {}, [rsp]", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    movss {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                }
+                            }
+                            writeln!(writer, "    add rsp, 16")?;
+                            writeln!(
+                                writer,
+                                "    comiss {}, {}",
+                                compare!(@f $first),
+                                compare!(@f $second),
+                            )?;
+                        } else if size == 8 {
+                            if infer_one {
+                                if infer_bottom {
+                                    writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    movsd {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                } else {
+                                    writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    movsd {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                }
+                            }
+                            writeln!(writer, "    add rsp, 16")?;
+                            writeln!(
+                                writer,
+                                "    comisd {}, {}",
+                                compare!(@f $first),
+                                compare!(@f $second),
+                            )?;
+                        }
+                    } else {
+                        unreachable!();
+                    }
                 } else {
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
                     assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    assert!(type_stack[len - 1].is_integer());
                     writeln!(writer, "    popq rax")?;
                     writeln!(writer, "    popq rbx")?;
                     writeln!(writer, "    cmp {}, {}", compare!(@n $first), compare!(@n $second))?;
@@ -568,14 +583,6 @@ impl Cast {
                         }
                         _ => unreachable!(),
                     }
-                    if self.target.size() != 4 {
-                        writeln!(
-                            writer,
-                            "    movsx {}, {}",
-                            Register::Rax.for_size(self.target.size()),
-                            Register::Rax.for_size(4),
-                        )?;
-                    }
                     writeln!(writer, "    pushq rax")?;
                 }
             }
@@ -598,7 +605,17 @@ impl Cast {
                             )?;
                             writeln!(writer, "    pushq rax")?;
                         }
-                        Type::F64 | Type::Float => todo!("i_ => f64"),
+                        Type::F64 | Type::Float => {
+                            writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(
+                                writer,
+                                "    cvtsd2si {}, {}",
+                                Register::Rax.for_size(4),
+                                FloatRegister::Xmm0
+                            )?;
+                            writeln!(writer, "    pushq rax")?;
+                        }
                         _ => unreachable!(),
                     }
                     if self.target.size() > src.size() {
@@ -627,24 +644,46 @@ impl Cast {
                     match src {
                         Type::F32 => { /* nop */ }
                         Type::F64 => {
-                            writeln!(writer, "cvtss2sd xmm0, [rsp]")?;
-                            writeln!(writer, "movsd [rsp], xmm0")?;
+                            writeln!(writer, "cvtsd2ss xmm0, [rsp]")?;
+                            writeln!(writer, "movss [rsp], xmm0")?;
                         }
                         _ => unreachable!(),
                     }
                 }
             }
-            Type::F64 => todo!(),
+            Type::F64 => {
+                if src.is_integer() {
+                    // TODO: I64 -> f32 how?
+                    src.pop_as(writer, Register::Rax, &Type::I32)?;
+                    writeln!(
+                        writer,
+                        "    cvtsi2sd {}, {}",
+                        FloatRegister::Xmm0,
+                        Register::Rax.for_size(4)
+                    )?;
+                    writeln!(writer, "    sub rsp, 8")?;
+                    writeln!(writer, "    movsd [rsp], xmm0")?;
+                } else if src.is_float() {
+                    match src {
+                        Type::F32 => {
+                            writeln!(writer, "cvtss2sd xmm0, [rsp]")?;
+                            writeln!(writer, "movsd [rsp], xmm0")?;
+                        }
+                        Type::F64 => { /* nop */ }
+                        _ => unreachable!(),
+                    }
+                }
+            }
             Type::Float => { /* nop */ }
             Type::Pointer(_) => { /* nop */ }
             Type::FatPointer => todo!(),
             Type::Struct => todo!(),
             Type::Bool => {
-                write!(writer, "    pop rax")?;
-                write!(writer, "    cmp rax, 0")?;
-                write!(writer, "    setne al")?;
-                write!(writer, "    movzx rax, al")?;
-                write!(writer, "    pushq rax")?;
+                writeln!(writer, "    pop rax")?;
+                writeln!(writer, "    cmp rax, 0")?;
+                writeln!(writer, "    setne al")?;
+                writeln!(writer, "    movzx rax, al")?;
+                writeln!(writer, "    pushq rax")?;
             }
         }
         type_stack.push(self.target.clone());
@@ -707,12 +746,12 @@ impl<W: Write> CodeGen<W> {
         writeln!(self.writer, r#"format ELF64"#)?;
         writeln!(self.writer, r#"section ".text" executable"#)?;
 
-        writeln!(self.writer, r#"public main"#)?;
+        writeln!(self.writer, r#"public ?main as "main""#)?;
         writeln!(self.writer)?;
 
         for f in self.module.functions.values() {
             if f.external {
-                writeln!(self.writer, "extrn {}", f.linker_name)?;
+                writeln!(self.writer, "extrn {0:?} as ?{0}", f.linker_name)?;
             }
         }
         writeln!(self.writer)?;
@@ -774,18 +813,14 @@ impl<W: Write> CodeGen<W> {
         self.type_stack.clear();
         self.type_stack.extend_from_slice(&func.args);
 
-        if FASM_SYMBOLS.contains(&f.linker_name) {
-            writeln!(self.writer, "__stark_{}:", f.linker_name)?;
-        } else {
-            writeln!(self.writer, "{}:", f.linker_name)?;
-        }
+        writeln!(self.writer, "?{}:", f.linker_name)?;
 
         if is_main {
             writeln!(self.writer, "    push rbp")?;
             writeln!(self.writer, "    mov rbp, rsp")?;
         } else {
-            let mut floati = func.args.iter().filter(|t| t.is_float()).count();
-            let mut regi = func
+            let floati = func.args.iter().filter(|t| t.is_float()).count();
+            let regi = func
                 .args
                 .iter()
                 .filter(|t| !t.is_float() && t.size() <= 8)
@@ -796,6 +831,8 @@ impl<W: Write> CodeGen<W> {
             {
                 todo!("extra values on the stack");
             }
+            let mut floati = floati.saturating_sub(1);
+            let mut regi = regi.saturating_sub(1);
             for x in func.args.iter().rev() {
                 if x.is_float() {
                     writeln!(self.writer, "    sub rsp, {}", x.padded_size())?;
@@ -804,14 +841,14 @@ impl<W: Write> CodeGen<W> {
                         "    movss [rsp], {}",
                         FloatRegister::ARG_REGS[floati]
                     )?;
-                    floati -= 1;
+                    floati = floati.saturating_sub(1);
                 } else if x.size() <= 8 {
                     writeln!(
                         self.writer,
-                        "    mov [rsp], {}",
+                        "    push {}",
                         Register::ARG_REGS[regi].for_size(8)
                     )?;
-                    regi -= 1;
+                    regi = regi.saturating_sub(1);
                 }
             }
             // writeln!(self.writer, "    push rbp")?;
@@ -899,9 +936,9 @@ impl<W: Write> CodeGen<W> {
             IrKind::PushFloat(f) => {
                 let label = self.data.add_float(f);
                 self.type_stack.push(ty!(Float));
-                writeln!(self.writer, "    movss xmm0, [{}]", label)?;
+                writeln!(self.writer, "    movsd xmm0, [{}]", label)?;
                 writeln!(self.writer, "    sub rsp, 8")?;
-                writeln!(self.writer, "    movss [rsp], xmm0")?;
+                writeln!(self.writer, "    movsd [rsp], xmm0")?;
             }
             IrKind::PushBool(b) => {
                 self.type_stack.push(ty!(bool));
@@ -1023,66 +1060,57 @@ impl<W: Write> CodeGen<W> {
     fn compile_function_call(&mut self, ident: Ident) -> Result<(), CodeGenError> {
         let f = &self.module.functions[&ident.ident];
 
-        if true || f.external {
-            let mut register_i = 0;
-            let mut float_i = 0;
-            let mut argi = 0;
-            for _ in 0..ident.len.map(|x| x as usize).unwrap_or(f.args.len()) {
-                let ty = self.type_stack.pop(ident.span)?;
-                if argi < f.args.len() {
-                    assert!(ty.matches(&f.args[argi]));
-                    argi += 1;
-                }
-                let dest = ty.argument_dest();
-                match dest {
-                    ArgumentDest::Register if register_i < Register::ARG_REGS.len() => {
-                        let dest = Register::ARG_REGS[register_i];
-                        writeln!(self.writer, "    popq {}", dest.for_size(8))?;
-                        register_i += 1;
-                    }
-                    ArgumentDest::Register => todo!("overflow on stack"),
-                    ArgumentDest::Stack => todo!("compact on the stack"),
-                    ArgumentDest::FloatRegister if float_i < FloatRegister::ARG_REGS.len() => {
-                        let dest = FloatRegister::ARG_REGS[float_i];
-                        writeln!(self.writer, "    pxor {0}, {0}", dest)?;
-                        writeln!(self.writer, "    cvtss2sd {}, [rsp]", dest)?;
-                        writeln!(self.writer, "    add rsp, 8")?;
-                        float_i += 1;
-                    }
-                    ArgumentDest::FloatRegister => todo!("overflow on stack"),
-                }
+        let mut register_i = 0;
+        let mut float_i = 0;
+        let mut argi = 0;
+        for _ in 0..ident.len.map(|x| x as usize).unwrap_or(f.args.len()) {
+            let ty = self.type_stack.pop(ident.span)?;
+            if argi < f.args.len() {
+                assert!(
+                    ty.matches(&f.args[f.args.len() - argi - 1]),
+                    "Mismatched types.  Expected: {},  Actual: {}",
+                    f.args[argi],
+                    ty
+                );
+                argi += 1;
             }
-
-            self.type_stack.extend_from_slice(&f.returns);
-            // TODO: What should go in rax?
-            writeln!(self.writer, "    mov rax, {}", float_i)?;
-            writeln!(self.writer, "    call {}", f.linker_name)?;
-
-            // Push first argument back onto the stack
-            if let Some(ret) = f.returns.first() {
-                match ret.argument_dest() {
-                    ArgumentDest::Register => writeln!(self.writer, "    push rax")?,
-                    ArgumentDest::Stack => todo!(),
-                    ArgumentDest::FloatRegister => {
-                        assert_eq!(*ret, ty!(f32));
-                        writeln!(self.writer, "    sub rsp, 8")?;
-                        writeln!(self.writer, "    movss [rsp], xmm0")?;
-                    }
+            let dest = ty.argument_dest();
+            match dest {
+                ArgumentDest::Register if register_i < Register::ARG_REGS.len() => {
+                    let dest = Register::ARG_REGS[register_i];
+                    writeln!(self.writer, "    popq {}", dest.for_size(8))?;
+                    register_i += 1;
                 }
-            }
-        } else {
-            f.apply(&ident, &mut self.type_stack)?;
-            writeln!(self.writer, "    mov rax, 0")?;
-            if FASM_SYMBOLS.contains(&f.linker_name) {
-                writeln!(self.writer, "    call __stark_{}", f.linker_name)?;
-            } else {
-                writeln!(self.writer, "    call {}", f.linker_name)?;
+                ArgumentDest::Register => todo!("overflow on stack"),
+                ArgumentDest::Stack => todo!("compact on the stack"),
+                ArgumentDest::FloatRegister if float_i < FloatRegister::ARG_REGS.len() => {
+                    let dest = FloatRegister::ARG_REGS[float_i];
+                    writeln!(self.writer, "    pxor {0}, {0}", dest)?;
+                    writeln!(self.writer, "    cvtss2sd {}, [rsp]", dest)?;
+                    writeln!(self.writer, "    add rsp, 8")?;
+                    float_i += 1;
+                }
+                ArgumentDest::FloatRegister => todo!("overflow on stack"),
             }
         }
 
-        // for t in f.returns {
-        //     self.type_stack.push(Type::from_atom(&t).expect("TODO"));
-        // }
+        self.type_stack.extend_from_slice(&f.returns);
+        // TODO: What should go in rax?
+        writeln!(self.writer, "    mov rax, {}", float_i)?;
+        writeln!(self.writer, "    call ?{}", f.linker_name)?;
+
+        // Push first argument back onto the stack
+        if let Some(ret) = f.returns.first() {
+            match ret.argument_dest() {
+                ArgumentDest::Register => writeln!(self.writer, "    push rax")?,
+                ArgumentDest::Stack => todo!(),
+                ArgumentDest::FloatRegister => {
+                    assert_eq!(*ret, ty!(f32));
+                    writeln!(self.writer, "    sub rsp, 8")?;
+                    writeln!(self.writer, "    movss [rsp], xmm0")?;
+                }
+            }
+        }
 
         Ok(())
     }

@@ -136,6 +136,7 @@ impl Type {
                     "u8" => Some(Self::U8),
 
                     "f32" => Some(Self::F32),
+                    "f64" => Some(Self::F64),
 
                     "fatptr" => Some(Self::FatPointer), // TODO: "fatptr" is bad
                     "bool" => Some(Self::Bool),
@@ -1036,7 +1037,7 @@ impl Cast {
         match ir.kind {
             IrKind::PushInt(ref mut n) => {
                 if self.target.is_integer() {
-                    *n %= 2u32.pow(8 * self.target.size()) as i128;
+                    *n &= (1 << (8 * self.target.size())) - 1;
                     ir_stack.push(ir);
                 } else if self.target == Type::Bool {
                     ir_stack.push(Ir::new(ir.span, IrKind::PushBool(*n != 0)));
@@ -1049,7 +1050,7 @@ impl Cast {
             }
             IrKind::PushFloat(f) => {
                 if self.target.is_integer() {
-                    let n = f as i128 % 2u32.pow(8 * self.target.size()) as i128;
+                    let n = f as i128 & ((1 << (8 * self.target.size())) - 1);
                     ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n)));
                 } else if self.target.is_float() {
                     // nop
@@ -1058,9 +1059,26 @@ impl Cast {
                     panic!()
                 }
             }
-            IrKind::PushBool(_) => {
-                assert_eq!(self.target, Type::Bool);
-                ir_stack.push(ir);
+            IrKind::PushBool(b) => {
+                let kind = match self.target {
+                    Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::I64
+                    | Type::U8
+                    | Type::U16
+                    | Type::U32
+                    | Type::U64
+                    | Type::Integer => IrKind::PushInt(if b { 1 } else { 0 }),
+                    Type::F32 => todo!(),
+                    Type::F64 => todo!(),
+                    Type::Float => todo!(),
+                    Type::Pointer(_) => todo!(),
+                    Type::FatPointer => todo!(),
+                    Type::Struct => todo!(),
+                    Type::Bool => IrKind::PushBool(b),
+                };
+                ir_stack.push(Ir::new(ir.span, kind));
             }
             IrKind::PushCStr(_) => todo!(),
             IrKind::PushStr(_) => todo!(),
