@@ -1086,9 +1086,10 @@ impl<W: Write> CodeGen<W> {
         let mut argi = 0;
         for _ in 0..ident.arity.map(|x| x as usize).unwrap_or(f.args.len()) {
             let ty = self.type_stack.pop(ident.span)?;
+            let arg_ty = &f.args[f.args.len() - argi - 1];
             if argi < f.args.len() {
                 assert!(
-                    ty.matches(&f.args[f.args.len() - argi - 1]),
+                    ty.matches(arg_ty),
                     "Mismatched types.  Expected: {},  Actual: {}",
                     f.args[argi],
                     ty
@@ -1107,7 +1108,14 @@ impl<W: Write> CodeGen<W> {
                 ArgumentDest::FloatRegister if float_i < FloatRegister::ARG_REGS.len() => {
                     let dest = FloatRegister::ARG_REGS[float_i];
                     writeln!(self.writer, "    pxor {0}, {0}", dest)?;
-                    writeln!(self.writer, "    cvtss2sd {}, [rsp]", dest)?;
+                    let instruction = match (ty, arg_ty) {
+                        (Type::F32, Type::F32) => "movss",
+                        (Type::F32, Type::F64) => "cvtss2sd",
+                        (Type::F64 | Type::Float, Type::F32) => "cvtsd2ss",
+                        (Type::F64 | Type::Float, Type::F64) => "movsd",
+                        _ => unreachable!(),
+                    };
+                    writeln!(self.writer, "    {} {}, [rsp]", instruction, dest)?;
                     writeln!(self.writer, "    add rsp, 8")?;
                     float_i += 1;
                 }
