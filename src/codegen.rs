@@ -717,6 +717,7 @@ pub enum CodeGenError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error(transparent)]
+    #[diagnostic(transparent)]
     IrGenError(#[from] IrGenError),
     #[error("Module is missing entrypoint")]
     #[diagnostic(help("Create a function with a valid main signature."))]

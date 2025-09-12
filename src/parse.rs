@@ -280,6 +280,7 @@ pub struct Parser<'a> {
 #[derive(Debug, Clone, Error, Diagnostic)]
 pub enum ParseError {
     #[error(transparent)]
+    #[diagnostic(transparent)]
     LexError(#[from] LexError),
     #[error("Unexpected token '{found:?}'")]
     UnexpectedToken {

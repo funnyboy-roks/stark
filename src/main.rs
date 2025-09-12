@@ -1,10 +1,15 @@
-use std::{fs::File, path::Path};
+use std::{
+    fs::File,
+    io::{BufReader, Cursor},
+    path::Path,
+};
 
 use clap::Parser;
 use lex::Lexer;
-use miette::NamedSource;
+use miette::{highlighters::SyntectHighlighter, NamedSource};
+use syntect::highlighting::ThemeSet;
 
-use crate::ir::Module;
+use crate::{cli::Cli, ir::Module};
 
 pub mod cli;
 pub mod compile;
@@ -19,44 +24,59 @@ fn main() -> Result<(), miette::Error> {
     let cli = cli::Cli::parse();
 
     let content = std::fs::read_to_string(&cli.file).unwrap();
-    let lex = Lexer::new(&content, cli.file.to_str().unwrap());
 
+    miette::set_hook(Box::new(|_| {
+        // TODO: custom syntax, but syntect is a PITA
+        let mut a = include_bytes!("../theme/base16-circus.tmTheme").as_slice();
+        let mut buf = BufReader::new(Cursor::new(&mut a));
+        Box::new(
+            miette::MietteHandlerOpts::new()
+                .terminal_links(true)
+                .with_syntax_highlighting(SyntectHighlighter::new_themed(
+                    ThemeSet::load_from_reader(&mut buf).unwrap(),
+                    false,
+                ))
+                .context_lines(3)
+                .build(),
+        )
+    }))
+    .unwrap();
+
+    fn wrap_miette<T>(
+        r: Result<T, miette::Error>,
+        cli: &Cli,
+        content: impl Into<String>,
+    ) -> Result<T, miette::Report> {
+        r.map_err(|e| {
+            e.with_source_code(
+                NamedSource::new(cli.file.to_string_lossy(), content.into()).with_language("Rust"),
+            )
+        })
+    }
+
+    wrap_miette(main2(&cli, content.clone()), &cli, content)?;
+
+    Ok(())
+}
+
+fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
+    let lex = Lexer::new(&content, cli.file.to_str().unwrap());
     if cli.subcmd.lex {
         for tok in lex {
-            let tok = tok.map_err(|e| {
-                miette::Error::from(e).with_source_code(NamedSource::new(
-                    cli.file.to_string_lossy(),
-                    content.to_string(),
-                ))
-            })?;
+            let tok = tok?;
             println!("{:?}", tok);
         }
     } else if cli.subcmd.parse {
         eprintln!("parsing...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
+        let ast = parser.parse()?;
         dbg!(ast);
     } else if cli.subcmd.ir {
         eprintln!("generating ir...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
+        let ast = parser.parse()?;
         let mut module = Module::new(ast, false);
-        module.compile_module().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
+        module.compile_module()?;
 
         eprintln!(
             "[{}:{}:{}] maker.functions = {:?}",
@@ -85,37 +105,14 @@ fn main() -> Result<(), miette::Error> {
             .with_extension("s");
         let mut asm_file = File::create(asm_path).unwrap();
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
-        let comp = compile::Compiler::new(&cli, &ast, &mut asm_file);
-        comp.compile().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
+        let ast = parser.parse()?;
+        let comp = compile::Compiler::new(cli, &ast, &mut asm_file);
+        comp.compile()?;
     } else {
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse().map_err(|e| match e {
-            parse::ParseError::LexError(e) => miette::Error::from(e).with_source_code(
-                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
-            ),
-            _ => miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            )),
-        })?;
+        let ast = parser.parse()?;
         let mut module = Module::new(ast, true);
-        module.compile_module().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
+        module.compile_module()?;
 
         let out_path = cli
             .asm_out
@@ -127,15 +124,7 @@ fn main() -> Result<(), miette::Error> {
 
         eprintln!("generating code...");
         let mut codegen = codegen::CodeGen::new(module, &mut out);
-        codegen.compile().map_err(|e| match e {
-            codegen::CodeGenError::IrGenError(e) => miette::Error::from(e).with_source_code(
-                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
-            ),
-            e => miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            )),
-        })?;
+        codegen.compile()?;
     }
     Ok(())
 }

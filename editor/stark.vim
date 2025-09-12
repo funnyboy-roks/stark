@@ -39,7 +39,7 @@ syntax match starkLabel /'[a-zA-Z0-9_]\+/
 syntax match starkVariadic /\.\.\./
 
 syntax keyword starkKeyword extern fn
-syntax keyword starkKeyword dup dup2 drop extern fn swap
+syntax keyword starkKeyword dup dup2 drop extern fn swap cast
 syntax keyword starkKeyword break
 
 syntax keyword starkBoolean true false

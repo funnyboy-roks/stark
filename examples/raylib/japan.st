@@ -9,6 +9,7 @@ extern fn ClearBackground(u32);
 extern fn DrawCircle(i32 i32 f32 u32);
 extern fn CloseWindow;
 
+
 fn main {
     c"hello world" 600 900 InitWindow
 

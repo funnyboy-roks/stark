@@ -540,9 +540,10 @@ impl Type {
 #[derive(Debug, Error, Diagnostic)]
 pub enum CompileError {
     #[error(transparent)]
-    LexError(#[from] LexError),
-    #[error(transparent)]
     IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    LexError(#[from] LexError),
     #[error("Stack underflow")]
     StackUnderflow {
         #[label = "because of this"]
