@@ -387,7 +387,7 @@ impl Type {
                 Type::F32 => None,
                 Type::F64 => None,
                 Type::Float => None,
-                Type::Pointer(_) => None,
+                Type::Pointer(_) => Some(vec![other.clone()]),
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -723,7 +723,7 @@ impl Builtin {
                     .ok_or(IrGenError::StackUnderflow { span })?;
                 let returns = a.add(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
-                    message: format!("Cannot add {} to {}", b, a),
+                    message: format!("Cannot add {} to {}", a, b),
                 })?;
                 Ok((2, returns))
             }
@@ -733,7 +733,7 @@ impl Builtin {
                     .ok_or(IrGenError::StackUnderflow { span })?;
                 let returns = a.sub(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
-                    message: format!("Cannot subtract {} from {}", b, a),
+                    message: format!("Cannot subtract {} from {}", a, b),
                 })?;
                 Ok((2, returns))
             }
@@ -743,7 +743,7 @@ impl Builtin {
                     .ok_or(IrGenError::StackUnderflow { span })?;
                 let returns = a.mul(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
-                    message: format!("Cannot multiply {} by {}", b, a),
+                    message: format!("Cannot multiply {} by {}", a, b),
                 })?;
                 Ok((2, returns))
             }

@@ -352,7 +352,27 @@ impl Builtin {
                     //     popq rax
                     //     add rax, rbx
                     //     push rax
-                    writeln!(writer, "    popq rax")?;
+                    let n = if let Type::Pointer(x) = &type_stack[len - 1] {
+                        assert_eq!(x.size().count_ones(), 1, "x.size() is a power of two");
+                        let n = x.size().trailing_zeros();
+                        assert!(2u32.pow(n) == x.size());
+                        writeln!(writer, "    popq rbx")?;
+                        writeln!(writer, "    popq rax")?;
+                        writeln!(writer, "    pushq rbx")?;
+                        n
+                    } else if let Type::Pointer(x) = &type_stack[len - 2] {
+                        assert_eq!(x.size().count_ones(), 1, "x.size() is a power of two");
+                        let n = x.size().trailing_zeros();
+                        assert!(2u32.pow(n) == x.size());
+                        writeln!(writer, "    popq rax")?;
+                        n
+                    } else {
+                        0
+                    };
+
+                    if n != 0 {
+                        writeln!(writer, "    shl rax, {}", n)?;
+                    }
                     writeln!(writer, "    add [rsp], rax")?;
                 }
             }

@@ -49,8 +49,8 @@ extern fn printf(*i8 ...) -> (i64);
     - [x] User-defined functions
         - `fn double(i64) -> (i64) { dup + }`
         - type check function: stack = args, compile body, assert(stack = results)
-        - [ ] Need to see if we can clean up the generated assembly
-        - [ ] Ideally use linux calling convention so we can export the
+        - [x] Need to see if we can clean up the generated assembly
+        - [x] Ideally use linux calling convention so we can export the
           functions for use from other langauges
 - [ ] Macros
 - [ ] Modules
@@ -61,7 +61,7 @@ extern fn printf(*i8 ...) -> (i64);
 - [ ] structs
 - [ ] pointers
     - [x] Typed pointers
-        - [ ] Smarter pointer increments (like C)
+        - [x] Smarter pointer increments (like C)
     - [ ] Fat pointers for things like strings
 - [x] c-strings (null-terminated strings)
     - `c"hello"` -> `"hello", 0`
@@ -77,6 +77,6 @@ extern fn printf(*i8 ...) -> (i64);
       <stack_assertion> ::= <type_or_range> | <type_or_range> <stack_assertion>
       <line> ::= <statements> | <statements> "|" <stack_assertion>
       ```
-- [ ] Annotate stack function that would generate stack assertions
+- [ ] Annotate stack cli argument that generates stack assertions
       automatically and print to stdout
 - [ ] Proper BNF for the language
