@@ -367,6 +367,7 @@ impl Builtin {
                         writeln!(writer, "    popq rax")?;
                         n
                     } else {
+                        writeln!(writer, "    popq rax")?;
                         0
                     };
 
