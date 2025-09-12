@@ -21,7 +21,7 @@ fn main() -> Result<(), miette::Error> {
     let content = std::fs::read_to_string(&cli.file).unwrap();
     let lex = Lexer::new(&content, cli.file.to_str().unwrap());
 
-    if cli.lex {
+    if cli.subcmd.lex {
         for tok in lex {
             let tok = tok.map_err(|e| {
                 miette::Error::from(e).with_source_code(NamedSource::new(
@@ -31,7 +31,7 @@ fn main() -> Result<(), miette::Error> {
             })?;
             println!("{:?}", tok);
         }
-    } else if cli.parse {
+    } else if cli.subcmd.parse {
         eprintln!("parsing...");
         let parser = parse::Parser::new(lex);
         let ast = parser.parse().map_err(|e| {
@@ -41,7 +41,7 @@ fn main() -> Result<(), miette::Error> {
             ))
         })?;
         dbg!(ast);
-    } else if cli.ir {
+    } else if cli.subcmd.ir {
         eprintln!("generating ir...");
         let parser = parse::Parser::new(lex);
         let ast = parser.parse().map_err(|e| {
@@ -76,37 +76,7 @@ fn main() -> Result<(), miette::Error> {
                 eprintln!("        {:?}", y.kind);
             }
         }
-    } else if cli.codegen {
-        let parser = parse::Parser::new(lex);
-        let ast = parser.parse().map_err(|e| match e {
-            parse::ParseError::LexError(e) => miette::Error::from(e).with_source_code(
-                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
-            ),
-            _ => miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            )),
-        })?;
-        let mut module = Module::new(ast, true);
-        module.compile_module().map_err(|e| {
-            miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            ))
-        })?;
-
-        eprintln!("generating code...");
-        let mut codegen = codegen::CodeGen::new(module, std::io::stdout());
-        codegen.compile().map_err(|e| match e {
-            codegen::CodeGenError::IrGenError(e) => miette::Error::from(e).with_source_code(
-                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
-            ),
-            e => miette::Error::from(e).with_source_code(NamedSource::new(
-                cli.file.to_string_lossy(),
-                content.to_string(),
-            )),
-        })?;
-    } else {
+    } else if cli.subcmd.old {
         eprintln!("compiling...");
         let asm_path = cli
             .asm_out
@@ -127,6 +97,44 @@ fn main() -> Result<(), miette::Error> {
                 cli.file.to_string_lossy(),
                 content.to_string(),
             ))
+        })?;
+    } else {
+        let parser = parse::Parser::new(lex);
+        let ast = parser.parse().map_err(|e| match e {
+            parse::ParseError::LexError(e) => miette::Error::from(e).with_source_code(
+                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
+            ),
+            _ => miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            )),
+        })?;
+        let mut module = Module::new(ast, true);
+        module.compile_module().map_err(|e| {
+            miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            ))
+        })?;
+
+        let out_path = cli
+            .asm_out
+            .as_deref()
+            .unwrap_or_else(|| Path::new(cli.file.file_name().unwrap()))
+            .with_extension("s");
+
+        let mut out = File::create(out_path).unwrap();
+
+        eprintln!("generating code...");
+        let mut codegen = codegen::CodeGen::new(module, &mut out);
+        codegen.compile().map_err(|e| match e {
+            codegen::CodeGenError::IrGenError(e) => miette::Error::from(e).with_source_code(
+                NamedSource::new(cli.file.to_string_lossy(), content.to_string()),
+            ),
+            e => miette::Error::from(e).with_source_code(NamedSource::new(
+                cli.file.to_string_lossy(),
+                content.to_string(),
+            )),
         })?;
     }
     Ok(())

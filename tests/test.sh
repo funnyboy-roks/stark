@@ -15,7 +15,7 @@ build() {
     asm="$1.s"
     obj="$1.o"
 
-    cargo r -q -- --gen "$1.st" > "$asm"
+    cargo r -q -- "$1.st" -o "$asm"
     fasm "$asm" "$obj"
     gcc -no-pie -o "$1" "$obj"
 }
