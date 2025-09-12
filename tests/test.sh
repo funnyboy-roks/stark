@@ -51,7 +51,7 @@ record() {
 test_single() {
     name=$(basename $1)
     echo "Testing '$name'"
-    build $1 |& awk "{ print \"[Compile '$name'] \" \$0 }"
+    build $1 2>&1 | awk "{ print \"[Compile '$name'] \" \$0 }"
     tmp=$(mktemp)
     run $1 > $tmp
     dif=$(diff $tmp ./$name-out.txt --color=always -u)
@@ -59,7 +59,7 @@ test_single() {
     if [ $diffst -eq 0 ]; then
         echo -e "[Testing '$name'] ${GREEN}Test passed! ✔️$RESET"
     else
-        echo "$dif" |& awk "{ print \"[Testing '$name'] \" \$0 }"
+        echo "$dif" 2>&1 | awk "{ print \"[Testing '$name'] \" \$0 }"
         echo "[Testing '$name'] ${RED}Test failed! ❌$RESET"
         return 1
     fi
@@ -92,8 +92,8 @@ case "$1" in
         fi
         shift
         exe=${1%.st}
-        build "$exe" |& awk "{ print \"[Compile '$exe'] \" \$0 }"
-        ./$exe       |& awk "{ print \"[Run '$exe'] \" \$0 }"
+        build "$exe" 2>&1 | awk "{ print \"[Compile '$exe'] \" \$0 }"
+        ./$exe       2>&1 | awk "{ print \"[Run '$exe'] \" \$0 }"
     ;;
     "record")
         if [ ! -n "$2" ]; then
