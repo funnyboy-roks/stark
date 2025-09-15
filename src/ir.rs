@@ -53,6 +53,13 @@ pub enum IrGenError {
         #[label = "here"]
         span: SourceSpan,
     },
+    #[error("debug_stack: {stack:?}")]
+    StackPrint {
+        // TODO: remove me
+        #[label = "here"]
+        span: SourceSpan,
+        stack: TypeStack,
+    },
     #[error("Undefined symbol '{ident}'")]
     UndefinedSymbol {
         ident: String,
@@ -93,6 +100,8 @@ pub enum Type {
     /// Unresolved float type
     Float,
     Pointer(Box<Type>),
+    /// `*void`
+    VoidPointer,
     // TODO: make this work
     FatPointer,
     // TODO: make this work
@@ -100,8 +109,140 @@ pub enum Type {
     Bool,
 }
 
+// TODO: hold the type here
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum IntLitType {
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    Unresolved,
+}
+
+impl From<IntLitType> for Type {
+    fn from(value: IntLitType) -> Self {
+        match value {
+            IntLitType::I8 => Type::I8,
+            IntLitType::I16 => Type::I16,
+            IntLitType::I32 => Type::I32,
+            IntLitType::I64 => Type::I64,
+            IntLitType::U8 => Type::U8,
+            IntLitType::U16 => Type::U16,
+            IntLitType::U32 => Type::U32,
+            IntLitType::U64 => Type::U64,
+            IntLitType::Unresolved => Type::Integer,
+        }
+    }
+}
+
+impl From<&IntLitType> for Type {
+    fn from(value: &IntLitType) -> Self {
+        match value {
+            IntLitType::I8 => Type::I8,
+            IntLitType::I16 => Type::I16,
+            IntLitType::I32 => Type::I32,
+            IntLitType::I64 => Type::I64,
+            IntLitType::U8 => Type::U8,
+            IntLitType::U16 => Type::U16,
+            IntLitType::U32 => Type::U32,
+            IntLitType::U64 => Type::U64,
+            IntLitType::Unresolved => Type::Integer,
+        }
+    }
+}
+
+impl From<&Type> for IntLitType {
+    fn from(value: &Type) -> Self {
+        match value {
+            Type::I8 => Self::I8,
+            Type::I16 => Self::I16,
+            Type::I32 => Self::I32,
+            Type::I64 => Self::I64,
+            Type::U8 => Self::U8,
+            Type::U16 => Self::U16,
+            Type::U32 => Self::U32,
+            Type::U64 => Self::U64,
+            Type::Integer => Self::Unresolved,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<Type> for IntLitType {
+    fn from(value: Type) -> Self {
+        match value {
+            Type::I8 => Self::I8,
+            Type::I16 => Self::I16,
+            Type::I32 => Self::I32,
+            Type::I64 => Self::I64,
+            Type::U8 => Self::U8,
+            Type::U16 => Self::U16,
+            Type::U32 => Self::U32,
+            Type::U64 => Self::U64,
+            Type::Integer => Self::Unresolved,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum FloatLitType {
+    F32,
+    F64,
+    Unresolved,
+}
+
+impl From<FloatLitType> for Type {
+    fn from(value: FloatLitType) -> Self {
+        match value {
+            FloatLitType::F32 => Type::F32,
+            FloatLitType::F64 => Type::F64,
+            FloatLitType::Unresolved => Type::Float,
+        }
+    }
+}
+
+impl From<&FloatLitType> for Type {
+    fn from(value: &FloatLitType) -> Self {
+        match value {
+            FloatLitType::F32 => Type::F32,
+            FloatLitType::F64 => Type::F64,
+            FloatLitType::Unresolved => Type::Float,
+        }
+    }
+}
+
+impl From<Type> for FloatLitType {
+    fn from(value: Type) -> Self {
+        match value {
+            Type::F32 => Self::F32,
+            Type::F64 => Self::F64,
+            Type::Float => Self::Unresolved,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<&Type> for FloatLitType {
+    fn from(value: &Type) -> Self {
+        match value {
+            Type::F32 => Self::F32,
+            Type::F64 => Self::F64,
+            Type::Float => Self::Unresolved,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! ty {
+    (*void) => {
+        Type::VoidPointer
+    };
     (*$($tt:tt)+) => {
         Type::Pointer(Box::new(ty!($($tt)+)))
     };
@@ -143,6 +284,7 @@ impl Type {
                     _ => None,
                 }
             }
+            TypeAtom::VoidPointer => Some(Self::VoidPointer),
             TypeAtom::Pointer(inner) => Some(Self::Pointer(Box::new(Self::from_atom(inner)?))),
         }
     }
@@ -154,8 +296,8 @@ impl Type {
             Type::I16 | Type::U16 => 2,
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::Integer | Type::Float => 8, // assume [uif]64
-            Type::Pointer(_) => 8,            // TODO: platform pointer size
+            Type::Integer | Type::Float => 8, // assume [if]64
+            Type::Pointer(_) | Type::VoidPointer => 8, // TODO: platform pointer size
             Type::FatPointer => todo!("fat pointer size"),
             Type::Struct => todo!("structs"),
         }
@@ -169,10 +311,31 @@ impl Type {
             Type::I32 | Type::U32 => 8,
             Type::F32 | Type::Float => 8,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::Integer => 8,    // assume [ui]64
-            Type::Pointer(_) => 8, // TODO: platform pointer size
+            Type::Integer => 8,                        // assume [ui]64
+            Type::Pointer(_) | Type::VoidPointer => 8, // TODO: platform pointer size
             Type::FatPointer => todo!("fat pointer size"),
             Type::Struct => todo!("structs"),
+        }
+    }
+
+    pub fn is_pointer(&self) -> bool {
+        match self {
+            Type::Pointer(_) | Type::VoidPointer => true,
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::Integer
+            | Type::F32
+            | Type::F64
+            | Type::Float
+            | Type::FatPointer
+            | Type::Struct
+            | Type::Bool => false,
         }
     }
 
@@ -187,7 +350,8 @@ impl Type {
             | Type::U32
             | Type::U64
             | Type::Integer
-            | Type::Pointer(_) => true, // NOTE: pointers are integers according to this
+            | Type::Pointer(_)
+            | Type::VoidPointer => true,
             Type::F32 | Type::F64 | Type::Float | Type::FatPointer | Type::Struct | Type::Bool => {
                 false
             }
@@ -207,6 +371,7 @@ impl Type {
             | Type::U64
             | Type::Integer
             | Type::Pointer(_)
+            | Type::VoidPointer
             | Type::FatPointer
             | Type::Struct
             | Type::Bool => false,
@@ -219,7 +384,7 @@ impl Type {
             Type::U8 | Type::U16 | Type::U32 | Type::U64 => false,
             Type::Integer => true, // assume true
             Type::F32 | Type::F64 | Type::Float => true,
-            Type::Pointer(_) => false,
+            Type::Pointer(_) | Type::VoidPointer => false,
             Type::FatPointer => todo!(),
             Type::Struct => todo!(),
             Type::Bool => false,
@@ -241,6 +406,7 @@ impl Type {
             | Type::F32
             | Type::F64
             | Type::Pointer(_)
+            | Type::VoidPointer
             | Type::FatPointer
             | Type::Struct
             | Type::Bool => false,
@@ -282,7 +448,7 @@ impl Type {
                 Type::F32 | Type::F64 => {}
                 _ => return None,
             },
-            Type::Pointer(_) => return None,
+            Type::Pointer(_) | Type::VoidPointer => return None,
             Type::FatPointer => return None,
             Type::Struct => return None,
             Type::Bool => return None,
@@ -326,7 +492,7 @@ impl Type {
                 Type::F32 | Type::F64 => {}
                 _ => return None,
             },
-            Type::Pointer(_) => return None,
+            Type::Pointer(_) | Type::VoidPointer => return None,
             Type::FatPointer => return None,
             Type::Struct => return None,
             Type::Bool => return None,
@@ -353,7 +519,7 @@ impl Type {
                 _ => None,
             },
             Type::F32 | Type::F64 | Type::Float => None,
-            Type::Pointer(_) => match other {
+            Type::Pointer(_) | Type::VoidPointer => match other {
                 Type::Integer => Some(vec![self.clone()]),
                 _ => None,
             },
@@ -387,7 +553,7 @@ impl Type {
                 Type::F32 => None,
                 Type::F64 => None,
                 Type::Float => None,
-                Type::Pointer(_) => Some(vec![other.clone()]),
+                Type::Pointer(_) | Type::VoidPointer => Some(vec![other.clone()]),
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -405,12 +571,12 @@ impl Type {
                 | Type::F32
                 | Type::F64
                 | Type::Float => Some(vec![self.clone()]),
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
             },
-            Type::Pointer(_) => match other {
+            Type::Pointer(_) | Type::VoidPointer => match other {
                 Type::I8
                 | Type::I16
                 | Type::I32
@@ -421,7 +587,7 @@ impl Type {
                 | Type::U64
                 | Type::Integer => Some(vec![self.clone()]),
                 Type::F32 | Type::F64 | Type::Float => None,
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -456,7 +622,7 @@ impl Type {
                 Type::F32 => None,
                 Type::F64 => None,
                 Type::Float => None,
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => Some(vec![other.clone()]),
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -474,12 +640,12 @@ impl Type {
                 | Type::F32
                 | Type::F64
                 | Type::Float => Some(vec![self.clone()]),
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
             },
-            Type::Pointer(_) => match other {
+            Type::Pointer(_) | Type::VoidPointer => match other {
                 Type::I8
                 | Type::I16
                 | Type::I32
@@ -488,9 +654,9 @@ impl Type {
                 | Type::U16
                 | Type::U32
                 | Type::U64
-                | Type::Integer => Some(vec![self.clone()]),
+                | Type::Integer => None,
                 Type::F32 | Type::F64 | Type::Float => None,
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -525,7 +691,7 @@ impl Type {
                 Type::F32 => None,
                 Type::F64 => None,
                 Type::Float => None,
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -541,12 +707,12 @@ impl Type {
                 | Type::U64
                 | Type::Integer => None,
                 Type::F32 | Type::F64 | Type::Float => Some(vec![self.clone()]),
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
             },
-            Type::Pointer(_) => None,
+            Type::Pointer(_) | Type::VoidPointer => None,
             Type::FatPointer => None,
             Type::Struct => None,
             Type::Bool => None,
@@ -577,7 +743,7 @@ impl Type {
                 Type::F32 => None,
                 Type::F64 => None,
                 Type::Float => None,
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
@@ -595,12 +761,12 @@ impl Type {
                 | Type::F32
                 | Type::F64
                 | Type::Float => Some(vec![self.clone()]),
-                Type::Pointer(_) => None,
+                Type::Pointer(_) | Type::VoidPointer => None,
                 Type::FatPointer => None,
                 Type::Struct => None,
                 Type::Bool => None,
             },
-            Type::Pointer(_) => None,
+            Type::Pointer(_) | Type::VoidPointer => None,
             Type::FatPointer => None,
             Type::Struct => None,
             Type::Bool => None,
@@ -623,7 +789,7 @@ impl Type {
             Type::Integer => unreachable!(),
             Type::F32 | Type::F64 => matches!(self, Type::Float),
             Type::Float => unreachable!(),
-            Type::Pointer(_) => false,
+            Type::Pointer(_) | Type::VoidPointer => false, // TODO: should we have implicit *void -> *T?
             Type::FatPointer => false,
             Type::Struct => false,
             Type::Bool => false,
@@ -651,7 +817,7 @@ impl Type {
                 !target.is_unresolved()
                     && (target.is_integer() || target.is_float() || *target == Type::Bool)
             }
-            Type::Pointer(_) => matches!(target, Type::U64 | Type::Pointer(_)), // pointer case not caught if inner type not equal
+            Type::Pointer(_) | Type::VoidPointer => matches!(target, Type::U64 | Type::Pointer(_)), // pointer case not caught if inner type not equal
             Type::FatPointer => todo!(),
             Type::Struct => todo!(),
             Type::Bool => !target.is_unresolved() && target.is_integer(),
@@ -683,6 +849,7 @@ impl Display for Type {
             Type::F64 => write!(f, "f64"),
             Type::Float => write!(f, "{{float}}"),
             Type::Pointer(inner) => write!(f, "*{}", inner),
+            Type::VoidPointer => write!(f, "*void"),
             Type::FatPointer => write!(f, "fatptr"),
             Type::Struct => write!(f, "fatptr"),
             Type::Bool => write!(f, "bool"),
@@ -704,10 +871,11 @@ pub enum Builtin {
     Lte,
     Gt,
     Gte,
-    Dup,
-    Dup2,
+    Dup(u32),
     Swap,
     Drop,
+    Load,
+    Store,
 }
 
 impl Builtin {
@@ -840,17 +1008,13 @@ impl Builtin {
                 })?;
                 Ok((2, returns))
             }
-            Builtin::Dup => {
-                let a = type_stack
-                    .last()
-                    .ok_or(IrGenError::StackUnderflow { span })?;
-                Ok((1, vec![a.clone(), a.clone()]))
-            }
-            Builtin::Dup2 => {
-                let [a, b] = type_stack
-                    .last_chunk::<2>()
-                    .ok_or(IrGenError::StackUnderflow { span })?;
-                Ok((2, vec![a.clone(), b.clone(), a.clone(), b.clone()]))
+            Builtin::Dup(n) => {
+                if type_stack.len() < n as _ {
+                    return Err(IrGenError::StackUnderflow { span });
+                }
+                let items = &type_stack[type_stack.len() - n as usize..];
+                let items: Vec<_> = items.iter().chain(items).cloned().collect();
+                Ok((n as _, items))
             }
             Builtin::Swap => {
                 let [a, b] = type_stack
@@ -863,6 +1027,37 @@ impl Builtin {
                     .last()
                     .ok_or(IrGenError::StackUnderflow { span })?;
                 Ok((1, Vec::new()))
+            }
+            Builtin::Load => {
+                let x = type_stack
+                    .last()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                // TODO: load from cstring
+                let Type::Pointer(ty) = x else {
+                    return Err(IrGenError::TypeError2 {
+                        span,
+                        message: format!("Cannot dereference {}", x),
+                    });
+                };
+                Ok((1, vec![ty.as_ref().clone()]))
+            }
+            Builtin::Store => {
+                let [pointer, value] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let Type::Pointer(inner) = pointer else {
+                    return Err(IrGenError::TypeError2 {
+                        span,
+                        message: format!("Cannot store {} into {}", value, pointer),
+                    });
+                };
+                if **inner != *value {
+                    return Err(IrGenError::TypeError2 {
+                        span,
+                        message: format!("Cannot store {} into {}", value, pointer),
+                    });
+                }
+                Ok((2, Vec::new()))
             }
         }
     }
@@ -880,7 +1075,7 @@ impl Builtin {
                 };
                 let b_ir = ir_stack.pop().expect("checked by caller");
                 let a_ir = ir_stack.pop().expect("checked by caller");
-                assert!(a_ty.add(b_ty).is_some());
+                let result_ty = a_ty.add(b_ty).unwrap().pop().unwrap();
 
                 let spans = [b_ir.span, a_ir.span, current.span];
                 match b_ty {
@@ -893,20 +1088,28 @@ impl Builtin {
                     | Type::U32
                     | Type::U64
                     | Type::Integer => {
-                        let (IrKind::PushInt(b), IrKind::PushInt(a)) = (&b_ir.kind, &a_ir.kind)
+                        let (IrKind::PushInt(b, _), IrKind::PushInt(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new_spans(spans, IrKind::PushInt(*a + *b)))
+                        ir_stack.push(Ir::new_spans(
+                            spans,
+                            IrKind::PushInt(*a + *b, result_ty.into()),
+                        ))
                     }
                     Type::F32 | Type::F64 | Type::Float => {
-                        let (IrKind::PushFloat(b), IrKind::PushFloat(a)) = (&b_ir.kind, &a_ir.kind)
+                        let (IrKind::PushFloat(b, _), IrKind::PushFloat(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new_spans(spans, IrKind::PushFloat(*a + *b)))
+                        ir_stack.push(Ir::new_spans(
+                            spans,
+                            IrKind::PushFloat(*a + *b, result_ty.into()),
+                        ))
                     }
-                    Type::Pointer(_) => todo!(),
+                    Type::Pointer(_) | Type::VoidPointer => todo!(),
                     Type::FatPointer => todo!(),
                     Type::Struct => todo!(),
                     Type::Bool => todo!(),
@@ -915,7 +1118,54 @@ impl Builtin {
                 Ok(())
             }
             Builtin::Sub => todo!(),
-            Builtin::Mul => todo!(),
+            Builtin::Mul => {
+                let [a_ty, b_ty] = type_stack else {
+                    unreachable!("checked by caller")
+                };
+                let b_ir = ir_stack.pop().expect("checked by caller");
+                let a_ir = ir_stack.pop().expect("checked by caller");
+                let result_ty = a_ty.mul(b_ty).unwrap().pop().unwrap();
+
+                let spans = [b_ir.span, a_ir.span, current.span];
+                match b_ty {
+                    Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::I64
+                    | Type::U8
+                    | Type::U16
+                    | Type::U32
+                    | Type::U64
+                    | Type::Integer => {
+                        let (IrKind::PushInt(b, _), IrKind::PushInt(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
+                        else {
+                            panic!("checked by caller")
+                        };
+                        ir_stack.push(Ir::new_spans(
+                            spans,
+                            IrKind::PushInt(*a * *b, result_ty.into()),
+                        ))
+                    }
+                    Type::F32 | Type::F64 | Type::Float => {
+                        let (IrKind::PushFloat(b, _), IrKind::PushFloat(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
+                        else {
+                            panic!("checked by caller")
+                        };
+                        ir_stack.push(Ir::new_spans(
+                            spans,
+                            IrKind::PushFloat(*a * *b, result_ty.into()),
+                        ))
+                    }
+                    Type::Pointer(_) | Type::VoidPointer => todo!(),
+                    Type::FatPointer => todo!(),
+                    Type::Struct => todo!(),
+                    Type::Bool => todo!(),
+                };
+
+                Ok(())
+            }
             Builtin::Div => todo!(),
             Builtin::Mod => todo!(),
             Builtin::Equal => {
@@ -937,20 +1187,22 @@ impl Builtin {
                     | Type::U32
                     | Type::U64
                     | Type::Integer => {
-                        let (IrKind::PushInt(b), IrKind::PushInt(a)) = (&b_ir.kind, &a_ir.kind)
+                        let (IrKind::PushInt(b, _), IrKind::PushInt(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
                         else {
                             panic!("checked by caller")
                         };
                         ir_stack.push(Ir::new_spans(spans, IrKind::PushBool(*a == *b)))
                     }
                     Type::F32 | Type::F64 | Type::Float => {
-                        let (IrKind::PushFloat(b), IrKind::PushFloat(a)) = (&b_ir.kind, &a_ir.kind)
+                        let (IrKind::PushFloat(b, _), IrKind::PushFloat(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
                         else {
                             panic!("checked by caller")
                         };
                         ir_stack.push(Ir::new_spans(spans, IrKind::PushBool(*a == *b)))
                     }
-                    Type::Pointer(_) => todo!(),
+                    Type::Pointer(_) | Type::VoidPointer => todo!(),
                     Type::FatPointer => todo!(),
                     Type::Struct => todo!(),
                     Type::Bool => {
@@ -979,12 +1231,8 @@ impl Builtin {
             Builtin::Lte => todo!(),
             Builtin::Gt => todo!(),
             Builtin::Gte => todo!(),
-            Builtin::Dup => {
-                ir_stack.extend_from_within(ir_stack.len() - 1..);
-                Ok(())
-            }
-            Builtin::Dup2 => {
-                ir_stack.extend_from_within(ir_stack.len() - 2..);
+            Builtin::Dup(n) => {
+                ir_stack.extend_from_within(ir_stack.len() - n as usize..);
                 Ok(())
             }
             Builtin::Swap => {
@@ -998,6 +1246,9 @@ impl Builtin {
                 ir_stack.pop().expect("checked by caller");
                 Ok(())
             }
+            // TODO: load from cstring
+            Builtin::Load => Ok(()),
+            Builtin::Store => Ok(()),
         }
     }
 }
@@ -1033,28 +1284,33 @@ pub struct Cast {
 }
 
 impl Cast {
-    pub fn apply(&self, mut ir: Ir, ir_stack: &mut Vec<Ir>) -> Result<(), IrGenError> {
+    pub fn apply(&self, ir: Ir, ir_stack: &mut Vec<Ir>) -> Result<(), IrGenError> {
         match ir.kind {
-            IrKind::PushInt(ref mut n) => {
+            IrKind::PushInt(n, _) => {
                 if self.target.is_integer() {
-                    *n &= (1 << (8 * self.target.size())) - 1;
-                    ir_stack.push(ir);
+                    let n = n & ((1 << (8 * self.target.size())) - 1);
+                    ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n, (&self.target).into())));
                 } else if self.target == Type::Bool {
-                    ir_stack.push(Ir::new(ir.span, IrKind::PushBool(*n != 0)));
+                    ir_stack.push(Ir::new(ir.span, IrKind::PushBool(n != 0)));
                 } else if self.target.is_float() {
-                    let f = *n as f64;
-                    ir_stack.push(Ir::new(ir.span, IrKind::PushFloat(f)));
+                    let f = n as f64;
+                    ir_stack.push(Ir::new(
+                        ir.span,
+                        IrKind::PushFloat(f, (&self.target).into()),
+                    ));
                 } else {
                     panic!()
                 }
             }
-            IrKind::PushFloat(f) => {
+            IrKind::PushFloat(f, _) => {
                 if self.target.is_integer() {
                     let n = f as i128 & ((1 << (8 * self.target.size())) - 1);
-                    ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n)));
+                    ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n, (&self.target).into())));
                 } else if self.target.is_float() {
-                    // nop
-                    ir_stack.push(ir);
+                    ir_stack.push(Ir::new(
+                        ir.span,
+                        IrKind::PushFloat(f, (&self.target).into()),
+                    ));
                 } else {
                     panic!()
                 }
@@ -1069,11 +1325,13 @@ impl Cast {
                     | Type::U16
                     | Type::U32
                     | Type::U64
-                    | Type::Integer => IrKind::PushInt(if b { 1 } else { 0 }),
+                    | Type::Integer => {
+                        IrKind::PushInt(if b { 1 } else { 0 }, IntLitType::Unresolved)
+                    }
                     Type::F32 => todo!(),
                     Type::F64 => todo!(),
                     Type::Float => todo!(),
-                    Type::Pointer(_) => todo!(),
+                    Type::Pointer(_) | Type::VoidPointer => todo!(),
                     Type::FatPointer => todo!(),
                     Type::Struct => todo!(),
                     Type::Bool => IrKind::PushBool(b),
@@ -1099,9 +1357,9 @@ impl Cast {
 #[derive(Debug, Clone)]
 pub enum IrKind {
     /// Integer literal, to be coerced / operated on by const fns
-    PushInt(i128),
+    PushInt(i128, IntLitType),
     /// Float literal, to be coerced / operated on by const fns
-    PushFloat(f64),
+    PushFloat(f64, FloatLitType),
     /// Boolean literal to be operated on by const fns
     PushBool(bool),
     /// C String literal, becomes `*i8`
@@ -1125,7 +1383,7 @@ pub enum IrKind {
 impl IrKind {
     pub const fn is_const(&self) -> bool {
         match self {
-            IrKind::PushInt(_) | IrKind::PushFloat(_) | IrKind::PushBool(_) => true,
+            IrKind::PushInt(_, _) | IrKind::PushFloat(_, _) | IrKind::PushBool(_) => true,
             IrKind::PushCStr(_)
             | IrKind::PushStr(_)
             | IrKind::CallFn(_)
@@ -1371,9 +1629,12 @@ impl Module {
     fn scan_functions(&mut self) -> Result<(), IrGenError> {
         for ast in &self.asts {
             match ast {
-                Ast::Ident(_) | Ast::Atom(_) | Ast::Then(_) | Ast::While(_) | Ast::Cast(_) => {
-                    continue
-                }
+                Ast::Ident(_)
+                | Ast::Atom(_)
+                | Ast::Then(_)
+                | Ast::While(_)
+                | Ast::Cast(_)
+                | Ast::Dup(_) => continue,
                 Ast::ExternFn(f) => {
                     if let Some(original) = self.functions.get(&f.name) {
                         return Err(IrGenError::RepeatDefinition {
@@ -1489,22 +1750,37 @@ impl Module {
         }
         match ast {
             Ast::Ident(ident) => {
-                let f = self.functions.get(&ident.ident).ok_or_else(|| {
-                    IrGenError::UndefinedSymbol {
-                        ident: ident.ident.clone(),
+                if ident.ident == "debug_stack" {
+                    return Err(IrGenError::StackPrint {
                         span: ident.span,
-                    }
-                })?;
-                f.apply(&ident, type_stack)?;
-                out.push(Ir::new(ident.span, IrKind::CallFn(ident)));
+                        stack: type_stack.clone(),
+                    });
+                } else {
+                    let f = self.functions.get(&ident.ident).ok_or_else(|| {
+                        IrGenError::UndefinedSymbol {
+                            ident: ident.ident.clone(),
+                            span: ident.span,
+                        }
+                    })?;
+                    f.apply(&ident, type_stack)?;
+                    out.push(Ir::new(ident.span, IrKind::CallFn(ident)));
+                }
             }
             Ast::Atom(atom) => match atom.kind {
                 AtomKind::NumLit(num_lit) => match num_lit.value {
                     NumLitVal::Integer(n) => {
-                        simple!(atom.token.span, ty!(Integer), IrKind::PushInt(n))
+                        simple!(
+                            atom.token.span,
+                            ty!(Integer),
+                            IrKind::PushInt(n, IntLitType::Unresolved)
+                        )
                     }
                     NumLitVal::Float(f) => {
-                        simple!(atom.token.span, ty!(Float), IrKind::PushFloat(f))
+                        simple!(
+                            atom.token.span,
+                            ty!(Float),
+                            IrKind::PushFloat(f, FloatLitType::Unresolved)
+                        )
                     }
                 },
                 AtomKind::BoolLit(b) => simple!(atom.token.span, ty!(bool), IrKind::PushBool(b)),
@@ -1525,10 +1801,10 @@ impl Module {
                 AtomKind::Lte => builtin!(atom, Lte),
                 AtomKind::Gt => builtin!(atom, Gt),
                 AtomKind::Gte => builtin!(atom, Gte),
-                AtomKind::Dup => builtin!(atom, Dup),
-                AtomKind::Dup2 => builtin!(atom, Dup2),
                 AtomKind::Swap => builtin!(atom, Swap),
                 AtomKind::Drop => builtin!(atom, Drop),
+                AtomKind::Load => builtin!(atom, Load),
+                AtomKind::Store => builtin!(atom, Store),
                 AtomKind::Break => {
                     if let Some((loop_id, start_ts, body_span)) = outer_loop {
                         if !type_stack.matches(start_ts) {
@@ -1681,6 +1957,16 @@ impl Module {
                 x.type_check(type_stack)?;
                 out.push(Ir::new(c.span(), IrKind::Cast(x)));
             }
+            Ast::Dup(d) => {
+                let (consumed, returns) = Builtin::Dup(d.count).type_check(d.span(), type_stack)?;
+                let len = type_stack.len();
+                type_stack.truncate(len - consumed);
+                type_stack.extend_from_slice(&returns);
+                out.push(Ir::new(
+                    d.span(),
+                    IrKind::CallBuiltin(Builtin::Dup(d.count)),
+                ));
+            }
         }
         Ok(())
     }
@@ -1718,6 +2004,7 @@ impl Module {
             Ast::Then(_) => todo!(),
             Ast::While(_) => todo!(),
             Ast::Cast(_) => todo!(),
+            Ast::Dup(_) => todo!(),
         }
         Ok(())
     }
@@ -1740,13 +2027,13 @@ pub fn update_stacks(
     type_stack: &mut TypeStack,
 ) -> Result<(), IrGenError> {
     match ir.kind {
-        IrKind::PushInt(_) => {
+        IrKind::PushInt(_, ref kind) => {
+            type_stack.push(kind.into());
             ir_stack.push(ir);
-            type_stack.push(Type::Integer);
         }
-        IrKind::PushFloat(_) => {
+        IrKind::PushFloat(_, ref kind) => {
+            type_stack.push(kind.into());
             ir_stack.push(ir);
-            type_stack.push(Type::Float);
         }
         IrKind::PushBool(_) => {
             ir_stack.push(ir);

@@ -35,6 +35,7 @@ impl Spanned for Ident {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeAtom {
     Ident(String),
+    VoidPointer,
     Pointer(Box<TypeAtom>),
 }
 
@@ -61,11 +62,11 @@ pub enum AtomKind {
     Percent,
 
     // Keywords
-    Dup,
-    Dup2,
     Swap,
     Drop,
     Break,
+    Load,
+    Store,
 }
 
 impl TryFrom<TokenValue> for AtomKind {
@@ -97,13 +98,15 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Percent => Ok(Self::Percent),
             TokenValue::Ellipsis => Err(()),
             TokenValue::Arrow => Err(()),
-            TokenValue::Dup => Ok(Self::Dup),
-            TokenValue::Dup2 => Ok(Self::Dup2),
+            TokenValue::Dup => Err(()),
             TokenValue::Swap => Ok(Self::Swap),
             TokenValue::Drop => Ok(Self::Drop),
             TokenValue::Extern => Err(()),
             TokenValue::Fn => Err(()),
             TokenValue::Cast => Err(()),
+            TokenValue::Void => Err(()),
+            TokenValue::Load => Ok(Self::Load),
+            TokenValue::Store => Ok(Self::Store),
             TokenValue::Then => Err(()),
             TokenValue::Else => Err(()),
             TokenValue::While => Err(()),
@@ -247,6 +250,30 @@ impl Spanned for Cast {
     }
 }
 
+/// ```stark
+/// ... dup ...
+/// ... dup(2) ...
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dup {
+    /// ```stark
+    /// ... dup(*u8) ...
+    ///     ^^^^^^^^
+    /// ```
+    span: SourceSpan,
+    /// ```stark
+    /// ... dup(2) ...
+    ///         ^
+    /// ```
+    pub count: u32,
+}
+
+impl Spanned for Dup {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
 // TODO: This isn't really an ast
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ast {
@@ -257,6 +284,7 @@ pub enum Ast {
     Then(Then),
     While(While),
     Cast(Cast),
+    Dup(Dup),
 }
 
 impl Spanned for Ast {
@@ -269,6 +297,7 @@ impl Spanned for Ast {
             Ast::Then(t) => t.span(),
             Ast::While(w) => w.span(),
             Ast::Cast(c) => c.span(),
+            Ast::Dup(d) => d.span(),
         }
     }
 }
@@ -313,6 +342,14 @@ pub enum ParseError {
         #[label = "here"]
         span: SourceSpan,
         found: f64,
+    },
+    #[error("Integer out of range.  Got: {found}, expected integer in [{min}, {max}]")]
+    IntegerOutOfBounds {
+        #[label = "here"]
+        span: SourceSpan,
+        found: i128,
+        min: i128,
+        max: i128,
     },
     #[error("Nested function definitions are not supported")]
     NestedFunction {
@@ -423,37 +460,53 @@ impl<'a> Parser<'a> {
         let token = token?;
         match token.value {
             TokenValue::Asterisk => {
-                let (inner, span) = self.take_type()?;
-                let span = combine_span([token.span, span]);
-                Ok((TypeAtom::Pointer(Box::new(inner)), span))
+                if let Some(Ok(t)) = self.tokens.peek()
+                    && t.kind() == TokenKind::Void
+                {
+                    let t = self
+                        .tokens
+                        .next()
+                        .expect("peek is some")
+                        .expect("peek is ok");
+                    Ok((TypeAtom::VoidPointer, combine_span([token.span, t.span])))
+                } else {
+                    let (inner, span) = self.take_type()?;
+                    let span = combine_span([token.span, span]);
+                    Ok((TypeAtom::Pointer(Box::new(inner)), span))
+                }
             }
             TokenValue::Ident(ident) => Ok((TypeAtom::Ident(ident), token.span)),
-            _ => {
-                return Err(ParseError::unexpected_token(
-                    token,
-                    &[TokenKind::Ident, TokenKind::Asterisk],
-                ));
-            }
+            _ => Err(ParseError::unexpected_token(
+                token,
+                &[TokenKind::Ident, TokenKind::Asterisk],
+            )),
         }
     }
 
     fn take_args(&mut self, allow_variadic: bool) -> Result<(Vec<TypeAtom>, bool), ParseError> {
         let mut args = Vec::new();
         let mut variadic = false;
-        while let Some(t) = self.tokens.next() {
-            let t = t?;
+        while let Some(t) = self.tokens.peek() {
+            if t.is_err() {
+                let t = self.tokens.next().expect("peek is some");
+                return Err(t.expect_err("t.is_err() called above").into());
+            }
+            let t = t.as_ref().unwrap();
             match t.value {
-                TokenValue::Ident(ident) if !variadic => {
-                    args.push(TypeAtom::Ident(ident));
+                TokenValue::Ident(_) if !variadic => {
+                    let (ty, _) = self.take_type()?;
+                    args.push(ty);
                 }
                 TokenValue::Asterisk => {
                     let (ty, _) = self.take_type()?;
-                    args.push(TypeAtom::Pointer(Box::new(ty)));
+                    args.push(ty);
                 }
                 TokenValue::RParen => {
+                    let _ = self.tokens.next().unwrap()?;
                     break;
                 }
                 TokenValue::Ellipsis if !variadic => {
+                    let t = self.tokens.next().unwrap()?;
                     if !allow_variadic {
                         return Err(ParseError::unexpected_token(
                             t,
@@ -463,6 +516,7 @@ impl<'a> Parser<'a> {
                     variadic = true;
                 }
                 _ => {
+                    let t = self.tokens.next().unwrap()?;
                     return Err(ParseError::unexpected_token(
                         t,
                         if variadic {
@@ -654,33 +708,74 @@ impl<'a> Parser<'a> {
                 TokenValue::LCurly => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::RCurly => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Semicolon => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::BoolLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Neq => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Lte => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Gt => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Gte => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Percent => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::StrLit(_)
+                | TokenValue::CStrLit(_)
+                | TokenValue::NumLit(_)
+                | TokenValue::BoolLit(_)
+                | TokenValue::Plus
+                | TokenValue::Minus
+                | TokenValue::Asterisk
+                | TokenValue::Slash
+                | TokenValue::Equal
+                | TokenValue::Not
+                | TokenValue::Neq
+                | TokenValue::Lt
+                | TokenValue::Lte
+                | TokenValue::Gt
+                | TokenValue::Gte
+                | TokenValue::Percent
+                | TokenValue::Swap
+                | TokenValue::Drop
+                | TokenValue::Load
+                | TokenValue::Store
+                | TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Dup2 => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Swap => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Extern => Err(ParseError::NestedFunction { span: token.span })?,
                 TokenValue::Fn => Err(ParseError::NestedFunction { span: token.span })?,
                 TokenValue::Cast => {
                     out.push(Ast::Cast(self.take_cast(token)?));
                 }
+                TokenValue::Dup => 'x: {
+                    if let Some(Ok(x)) = self.tokens.peek()
+                        && x.kind() != TokenKind::LParen
+                    {
+                        out.push(Ast::Dup(Dup {
+                            span: token.span,
+                            count: 1,
+                        }));
+                        break 'x;
+                    }
+                    expect_token!(self, LParen);
+                    let (num, n) = expect_token!(self, NumLit(_));
+                    let (rparen, _) = expect_token!(self, RParen);
+
+                    let n = match n.value {
+                        NumLitVal::Integer(n) => n,
+                        NumLitVal::Float(val) => {
+                            return Err(ParseError::ExpectedInteger {
+                                span: num.span,
+                                found: val,
+                            });
+                        }
+                    };
+
+                    if !(1..=u32::MAX as _).contains(&n) {
+                        return Err(ParseError::IntegerOutOfBounds {
+                            span: num.span,
+                            found: n,
+                            min: 1,
+                            max: u32::MAX.into(),
+                        });
+                    }
+
+                    out.push(Ast::Dup(Dup {
+                        count: n as u32,
+                        span: (token.span.offset()..rparen.span.offset() + rparen.span.len())
+                            .into(),
+                    }));
+                }
+                TokenValue::Void => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Then => {
                     let t = self.take_then(token)?;
                     out.push(Ast::Then(t));
@@ -689,7 +784,6 @@ impl<'a> Parser<'a> {
                 TokenValue::While => {
                     out.push(Ast::While(self.take_while(token)?));
                 }
-                TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
             }
         }
 
@@ -834,28 +928,68 @@ impl<'a> Parser<'a> {
                 TokenValue::LCurly => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::RCurly => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Semicolon => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::StrLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::CStrLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::NumLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::BoolLit(_) => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Plus => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Minus => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Asterisk => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Slash => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Not => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Neq => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Lt => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Lte => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Gt => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Gte => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Percent => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Equal => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::StrLit(_)
+                | TokenValue::CStrLit(_)
+                | TokenValue::NumLit(_)
+                | TokenValue::BoolLit(_)
+                | TokenValue::Plus
+                | TokenValue::Minus
+                | TokenValue::Asterisk
+                | TokenValue::Slash
+                | TokenValue::Not
+                | TokenValue::Neq
+                | TokenValue::Lt
+                | TokenValue::Lte
+                | TokenValue::Gt
+                | TokenValue::Gte
+                | TokenValue::Percent
+                | TokenValue::Equal
+                | TokenValue::Swap
+                | TokenValue::Drop
+                | TokenValue::Load
+                | TokenValue::Store
+                | TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
+                TokenValue::Dup => 'x: {
+                    if let Some(Ok(x)) = self.tokens.peek()
+                        && x.kind() != TokenKind::LParen
+                    {
+                        out.push(Ast::Dup(Dup {
+                            span: token.span,
+                            count: 1,
+                        }));
+                        break 'x;
+                    }
+                    expect_token!(self, LParen);
+                    let (num, n) = expect_token!(self, NumLit(_));
+                    let (rparen, _) = expect_token!(self, RParen);
+
+                    let n = match n.value {
+                        NumLitVal::Integer(n) => n,
+                        NumLitVal::Float(val) => {
+                            return Err(ParseError::ExpectedInteger {
+                                span: num.span,
+                                found: val,
+                            });
+                        }
+                    };
+
+                    if !(1..=u32::MAX as _).contains(&n) {
+                        return Err(ParseError::IntegerOutOfBounds {
+                            span: num.span,
+                            found: n,
+                            min: 1,
+                            max: u32::MAX.into(),
+                        });
+                    }
+
+                    out.push(Ast::Dup(Dup {
+                        count: n as u32,
+                        span: (token.span.offset()..rparen.span.offset() + rparen.span.len())
+                            .into(),
+                    }));
+                }
                 TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Dup => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Dup2 => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Swap => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Drop => out.push(Ast::Atom(token.try_into()?)),
                 TokenValue::Extern => {
                     let f = self.take_extern_fn()?;
                     out.push(Ast::ExternFn(f));
@@ -868,6 +1002,7 @@ impl<'a> Parser<'a> {
                     let c = self.take_cast(token)?;
                     out.push(Ast::Cast(c));
                 }
+                TokenValue::Void => Err(ParseError::unexpected_token(token, &[]))?,
                 TokenValue::Then => {
                     let t = self.take_then(token)?;
                     out.push(Ast::Then(t));
@@ -876,7 +1011,6 @@ impl<'a> Parser<'a> {
                 TokenValue::While => {
                     out.push(Ast::While(self.take_while(token)?));
                 }
-                TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
             }
         }
 

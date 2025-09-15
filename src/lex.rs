@@ -11,7 +11,6 @@ use thiserror::Error;
 
 const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "dup" => TokenValue::Dup,
-    "dup2" => TokenValue::Dup2,
     "swap" => TokenValue::Swap,
     "drop" => TokenValue::Drop,
     "extern" => TokenValue::Extern,
@@ -23,6 +22,9 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "true" => TokenValue::BoolLit(true),
     "false" => TokenValue::BoolLit(false),
     "cast" => TokenValue::Cast,
+    "void" => TokenValue::Void,
+    "load" => TokenValue::Load,
+    "store" => TokenValue::Store,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,12 +102,14 @@ pub enum TokenKind {
 
     // Keywords
     Dup,
-    Dup2,
     Swap,
     Drop,
     Extern,
     Fn,
     Cast,
+    Void,
+    Load,
+    Store,
 
     Then,
     Else,
@@ -150,12 +154,14 @@ pub enum TokenValue {
 
     // Keywords
     Dup,
-    Dup2,
     Swap,
     Drop,
     Extern,
     Fn,
     Cast,
+    Void,
+    Load,
+    Store,
 
     Then,
     Else,
@@ -198,12 +204,14 @@ impl TokenValue {
             TokenValue::Ellipsis => TokenKind::Ellipsis,
             TokenValue::Arrow => TokenKind::Arrow,
             TokenValue::Dup => TokenKind::Dup,
-            TokenValue::Dup2 => TokenKind::Dup2,
             TokenValue::Swap => TokenKind::Swap,
             TokenValue::Drop => TokenKind::Drop,
             TokenValue::Extern => TokenKind::Extern,
             TokenValue::Fn => TokenKind::Fn,
             TokenValue::Cast => TokenKind::Cast,
+            TokenValue::Void => TokenKind::Void,
+            TokenValue::Load => TokenKind::Load,
+            TokenValue::Store => TokenKind::Store,
             TokenValue::Then => TokenKind::Then,
             TokenValue::Else => TokenKind::Else,
             TokenValue::While => TokenKind::While,
@@ -461,10 +469,12 @@ impl<'a> Lexer<'a> {
                             break;
                         }
                     }
-                    owned
-                        .as_mut()
-                        .unwrap()
-                        .push(char::from(u8::from_str_radix(&s, 8).expect("TODO")));
+                    let c = if s.is_empty() {
+                        '\0'
+                    } else {
+                        char::from(u8::from_str_radix(&s, 8).expect("TODO"))
+                    };
+                    owned.as_mut().unwrap().push(c);
                     escaping = false;
                 }
                 // TODO: support \x{1b}

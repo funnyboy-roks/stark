@@ -520,6 +520,7 @@ impl Type {
                     _ => None,
                 }
             }
+            TypeAtom::VoidPointer => panic!("*void not supported by old compiler"),
             TypeAtom::Pointer(inner) => Some(Self::Pointer(Box::new(Self::from_atom(inner)?))),
         }
     }
@@ -716,6 +717,7 @@ where
                 Ast::Then(_) => None,
                 Ast::While(_) => None,
                 Ast::Cast(_) => None,
+                Ast::Dup(_) => None,
             })
             .collect();
 
@@ -820,6 +822,7 @@ where
                 Ast::Then(_) => {}
                 Ast::While(_) => {}
                 Ast::Cast(_) => {}
+                Ast::Dup(_) => {}
             }
         }
 
@@ -1127,35 +1130,6 @@ where
                 z.push(&mut self.out, Register::Rdx)?;
                 self.type_stack.push(z);
             }
-            AtomKind::Dup => {
-                let x = self.pop(token.span)?;
-                let size = x.size();
-                assert!(size % 8 == 0);
-                writeln!(self.out, "    mov rsi, rsp")?;
-                writeln!(self.out, "    sub rsp, {}", size)?;
-                writeln!(self.out, "    mov rdi, rsp")?;
-                writeln!(self.out, "    mov rcx, {}", size / 8)?;
-                writeln!(self.out, "    rep movsq")?;
-                self.type_stack.push(x.clone());
-                self.type_stack.push(x);
-            }
-            AtomKind::Dup2 => {
-                let x = self.pop(token.span)?;
-                let y = self.pop(token.span)?;
-                self.type_stack.push(y.clone());
-                self.type_stack.push(x.clone());
-
-                let size = x.size() + y.size();
-                assert!(size % 8 == 0);
-                writeln!(self.out, "    mov rsi, rsp")?;
-                writeln!(self.out, "    sub rsp, {}", size)?;
-                writeln!(self.out, "    mov rdi, rsp")?;
-                writeln!(self.out, "    mov rcx, {}", size / 8)?;
-                writeln!(self.out, "    rep movsq")?;
-
-                self.type_stack.push(y);
-                self.type_stack.push(x);
-            }
             AtomKind::Swap => {
                 let x = self.pop(token.span)?;
                 x.pop(&mut self.out, Register::Rax)?;
@@ -1192,6 +1166,9 @@ where
             AtomKind::Lte => todo!(),
             AtomKind::Gt => todo!(),
             AtomKind::Gte => todo!(),
+            AtomKind::Load | AtomKind::Store => {
+                panic!("load/store not implemented for old compiler")
+            }
         }
         Ok(())
     }
@@ -1334,6 +1311,7 @@ where
                 Ast::Then(t) => self.compile_then(t)?,
                 Ast::While(w) => self.compile_while(w)?,
                 Ast::Cast(_) => todo!(),
+                Ast::Dup(_) => panic!("dup(n) is not implemented in the old compiler"),
             }
             writeln!(self.out)?;
         }
