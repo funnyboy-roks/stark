@@ -681,12 +681,12 @@ impl Cast {
                         }
                         _ => unreachable!(),
                     }
-                    if self.target.size() > src.size() {
+                    if src.size() < 4 {
                         writeln!(
                             writer,
                             "    movsx {}, {}",
-                            Register::Rax.for_size(self.target.size()),
-                            Register::Rax.for_size(4),
+                            Register::Rax.for_size(8),
+                            Register::Rax.for_size(src.size()),
                         )?;
                     }
                 }
