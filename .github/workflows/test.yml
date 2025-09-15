@@ -19,8 +19,6 @@ jobs:
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: Install fasm
-        run: |
-          wget -O fasm.tgz https://flatassembler.net/fasm-1.73.32.tgz
-          tar -xf fasm.tgz fasm/fasm --strip-components=1
+        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1'
       - name: Run Tests
         run: 'cd tests && PATH=..:$PATH ./test.sh'
