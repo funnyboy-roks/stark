@@ -1,21 +1,24 @@
 # stark
 
-A stack-based compiled programming language
+Stark is a strictly-typed stack-based compiled programming language with
+zero runtime.
 
 ## Examples
 
 ```zig
-extern fn printf(*i8 ...) -> (i64);
+extern fn printf(*i8 ...) -> (i32);
 
 "hello world" printf
 ```
 
 ```zig
 // 5 4 3 2 1
-5 while dup 0 = ! {
-    dup c"%d\n" printf(2) drop
+5
+while dup 0 != {
+    dup c"%d " printf(2) drop
     1 -
 } drop
+c"\n" printf drop
 ```
 
 ## TODO
@@ -23,7 +26,8 @@ extern fn printf(*i8 ...) -> (i64);
 - [x] Compilation
 - [x] Loops
     - [ ] Labels: `'x` `while'x` (I like the idea of having this "tick" syntax like rust)
-    - [ ] break: `break` or `break'x` -- still need to check that the stack has not changed
+    - [x] `break` out of loop
+    - [ ] break to label: `break'x`
 - [x] Conditionals (see [conditionals.st](./examples/conditional.st))
     - [x] `then`
     - [x] `else`
@@ -31,7 +35,7 @@ extern fn printf(*i8 ...) -> (i64);
 - [ ] Error handling
     - [ ] Report good type errors
     - [ ] Continue after error and report all at once
-- [ ] Non-decimal integer literals
+- [x] Non-decimal integer literals
 - [x] Full suite of numbers: i8, i16, i32, i64, u8, u16, u32, u64
 - [x] Miette + thiserror for better errors
 - [x] Type system
