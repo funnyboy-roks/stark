@@ -6,8 +6,8 @@ use thiserror::Error;
 use crate::{
     hash_float::FloatExt,
     ir::{
-        Builtin, Cast, ConvertedFunction, Ir, IrGenError, IrKind, Module, ThenIr, Type, TypeStack,
-        WhileIr,
+        Builtin, Cast, ConvertedFunction, FloatLitType, Ir, IrGenError, IrKind, Module, ThenIr,
+        Type, TypeStack, WhileIr,
     },
     parse::Ident,
     ty,
@@ -208,7 +208,8 @@ impl Type {
 #[derive(Default, Debug, Clone)]
 pub struct DataItems {
     bytes: HashMap<Box<[u8]>, usize>,
-    floats: HashMap<FloatExt<f64>, usize>,
+    // (float, double precision)
+    floats: HashMap<(FloatExt<f64>, bool), usize>,
 }
 
 impl DataItems {
@@ -224,9 +225,18 @@ impl DataItems {
         format!("bytes_{}", n)
     }
 
-    pub fn add_float(&mut self, float: f64) -> String {
+    pub fn add_f32(&mut self, float: f32) -> String {
         let len = self.floats.len();
-        let n = self.floats.entry(float.into()).or_insert(len);
+        let n = self
+            .floats
+            .entry(((float as f64).into(), false))
+            .or_insert(len);
+        format!("float_{}", n)
+    }
+
+    pub fn add_f64(&mut self, float: f64) -> String {
+        let len = self.floats.len();
+        let n = self.floats.entry((float.into(), true)).or_insert(len);
         format!("float_{}", n)
     }
 
@@ -243,9 +253,13 @@ impl DataItems {
             writeln!(out)?;
         }
 
-        for (f, n) in &self.floats {
+        for ((f, double_precision), n) in &self.floats {
             writeln!(out, "float_{}:", n)?;
-            writeln!(out, "    dq {:?}", **f)?;
+            if *double_precision {
+                writeln!(out, "    dq {:?}", **f)?;
+            } else {
+                writeln!(out, "    dd {:?}", **f)?;
+            }
         }
         Ok(())
     }
@@ -627,6 +641,7 @@ impl Cast {
                         Type::F32 => {
                             writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
                             writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(writer, "    xor rax, rax")?;
                             writeln!(
                                 writer,
                                 "    cvtss2si {}, {}",
@@ -680,14 +695,6 @@ impl Cast {
                             writeln!(writer, "    pushq rax")?;
                         }
                         _ => unreachable!(),
-                    }
-                    if src.size() < 4 {
-                        writeln!(
-                            writer,
-                            "    movsx {}, {}",
-                            Register::Rax.for_size(8),
-                            Register::Rax.for_size(src.size()),
-                        )?;
                     }
                 }
             }
@@ -997,11 +1004,24 @@ impl<W: Write> CodeGen<W> {
                 writeln!(self.writer, "    pushq rax")?;
             }
             IrKind::PushFloat(f, ty) => {
-                let label = self.data.add_float(f);
                 self.type_stack.push(ty.into());
-                writeln!(self.writer, "    movsd xmm0, [{}]", label)?;
-                writeln!(self.writer, "    sub rsp, 8")?;
-                writeln!(self.writer, "    movsd [rsp], xmm0")?;
+                writeln!(
+                    self.writer,
+                    "    sub rsp, {}",
+                    Type::from(&ty).padded_size()
+                )?;
+                match ty {
+                    FloatLitType::F32 => {
+                        let label = self.data.add_f32(f as f32);
+                        writeln!(self.writer, "    movss xmm0, [{}]", label)?;
+                        writeln!(self.writer, "    movss [rsp], xmm0")?;
+                    }
+                    FloatLitType::F64 | FloatLitType::Unresolved => {
+                        let label = self.data.add_f64(f);
+                        writeln!(self.writer, "    movsd xmm0, [{}]", label)?;
+                        writeln!(self.writer, "    movsd [rsp], xmm0")?;
+                    }
+                }
             }
             IrKind::PushBool(b) => {
                 self.type_stack.push(ty!(bool));

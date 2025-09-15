@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 set -e
 
@@ -14,10 +14,18 @@ fail() {
 build() {
     asm="$1.s"
     obj="$1.o"
-
     cargo r -q -- "$1.st" -o "$asm"
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
     fasm "$asm" "$obj"
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
     gcc -no-pie -o "$1" "$obj"
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
 }
 
 run() {
@@ -52,6 +60,10 @@ test_single() {
     name=$(basename $1)
     echo "Testing '$name'"
     build $1 2>&1 | awk "{ print \"[Compile '$name'] \" \$0 }"
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo -e "[Testing '$name'] ${RED}Test failed to build! ❌$RESET"
+        return 1
+    fi
     tmp=$(mktemp)
     run $1 > $tmp
     dif=$(diff ./$name-out.txt $tmp --color=always -u)

@@ -11,7 +11,7 @@ name: test
 jobs:
   fmt:
     runs-on: ubuntu-latest
-    name: stable / fmt
+    name: test
     steps:
       - uses: actions/checkout@v4
         with:
