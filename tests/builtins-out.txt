@@ -9,8 +9,8 @@ STDOUT:
         1 2 dup => Expected: 1 2 2, Actual: 1 2 2
         1   dup => Expected: 1 1,   Actual: 1 1
     dup2_test
-        1 2   dup => Expected: 1 2 1 2,   Actual: 1 2 1 2
-        1 2 3 dup => Expected: 1 2 3 2 3, Actual: 1 2 3 2 3
+        1 2   dup(2) => Expected: 1 2 1 2,   Actual: 1 2 1 2
+        1 2 3 dup(2) => Expected: 1 2 3 2 3, Actual: 1 2 3 2 3
     not_test
         false ! => Expected: true  (1), Actual: 1
         true  ! => Expected: false (0), Actual: 0

@@ -48,9 +48,9 @@ syntax keyword starkKeyword fn nextgroup=starkFuncName skipwhite skipempty
 syntax keyword starkKeyword swap drop break
 
 syntax match   starkKeyword /\<cast(.[^)]\+)/ contains=starkType
-syntax match   starkKeyword /\<dup\((\d\+)\)\?/ contains=starkDecNumber,starkHexNumber,starkBinNumber
+syntax match   starkKeyword /\<dup\((\d\+)\)\?\%([^[:cntrl:][:space:][:punct:]]\|_\)\@!/ contains=starkDecNumber,starkHexNumber,starkBinNumber
 
-syntax match starkFuncName /\%(r#\)\=\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*/ display contained
+syntax match starkFuncName /\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*/ display contained
 
 syntax keyword starkBoolean true false
 

@@ -54,7 +54,7 @@ test_single() {
     build $1 2>&1 | awk "{ print \"[Compile '$name'] \" \$0 }"
     tmp=$(mktemp)
     run $1 > $tmp
-    dif=$(diff $tmp ./$name-out.txt --color=always -u)
+    dif=$(diff ./$name-out.txt $tmp --color=always -u)
     diffst=$?
     if [ $diffst -eq 0 ]; then
         echo -e "[Testing '$name'] ${GREEN}Test passed! ✔️$RESET"

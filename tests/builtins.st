@@ -21,8 +21,8 @@ fn dup_test {
 }
 
 fn dup2_test {
-    1 2   blackbox dup2 c"    1 2   dup => Expected: 1 2 1 2,   Actual: %4$d %3$d %2$d %1$d\n" printf(5)
-    1 2 3 blackbox dup2 c"    1 2 3 dup => Expected: 1 2 3 2 3, Actual: %5$d %4$d %3$d %2$d %1$d\n" printf(6)
+    1 2   blackbox dup(2) c"    1 2   dup(2) => Expected: 1 2 1 2,   Actual: %4$d %3$d %2$d %1$d\n" printf(5)
+    1 2 3 blackbox dup(2) c"    1 2 3 dup(2) => Expected: 1 2 3 2 3, Actual: %5$d %4$d %3$d %2$d %1$d\n" printf(6)
 }
 
 fn not_test {
