@@ -1,0 +1,13 @@
+STDOUT:
+    strlen("hello") = 5
+    strlen("world") = 5
+    strlen("rust") = 4
+    strlen("hello world, how are you doing on this fine day?") = 48
+    strlen("") = 0
+    result = 'hello'
+    result = 'rust'
+
+STDERR:
+
+
+STATUS: 0

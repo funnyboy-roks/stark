@@ -60,7 +60,7 @@ test_single() {
         echo -e "[Testing '$name'] ${GREEN}Test passed! ✔️$RESET"
     else
         echo "$dif" 2>&1 | awk "{ print \"[Testing '$name'] \" \$0 }"
-        echo "[Testing '$name'] ${RED}Test failed! ❌$RESET"
+        echo -e "[Testing '$name'] ${RED}Test failed! ❌$RESET"
         return 1
     fi
     return 0
