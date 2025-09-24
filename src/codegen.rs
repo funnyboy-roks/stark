@@ -1,15 +1,16 @@
 use std::{borrow::Cow, collections::HashMap, fmt::Display, io::Write, ops::DerefMut};
 
-use miette::{Diagnostic, SourceSpan};
+use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::{
     hash_float::FloatExt,
     ir::{
-        Builtin, Cast, ConvertedFunction, FloatLitType, Ir, IrGenError, IrKind, Module, ThenIr,
-        Type, TypeStack, WhileIr,
+        Builtin, Cast, ConvertedFunction, FloatLitType, FunctionSignature, Ir, IrGenError, IrKind,
+        Module, ThenIr, Type, TypeStack, WhileIr,
     },
     parse::Ident,
+    span::{Span, Spanned},
     ty,
 };
 
@@ -774,12 +775,12 @@ pub enum CodeGenError {
     #[diagnostic(help("Use one of the following valid main signatures:\n    fn main;\n    fn main(u32 **i8);\n    fn main -> (i32);\n    fn main(u32 **i8) -> (i32);"))]
     InvalidMain {
         #[label = "this function"]
-        span: SourceSpan,
+        span: Span,
     },
     #[error("Not yet implemented: {}", feature)]
     NotImplemented {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
         feature: String,
     },
 }
@@ -800,6 +801,34 @@ pub struct CodeGen<W> {
     writer: W,
 }
 
+fn get_all_functions<'a>(
+    module: &'a Module,
+    out: &mut HashMap<Vec<String>, &'a FunctionSignature>,
+) {
+    for (name, s) in module.functions.iter() {
+        let mut v = module.path.clone();
+        v.push(name.clone());
+        out.insert(v, s);
+    }
+    for (m, _vis) in module.submodules.values() {
+        get_all_functions(m, out);
+    }
+}
+
+fn get_all_converted_functions(
+    module: &mut Module,
+    out: &mut HashMap<Vec<String>, ConvertedFunction>,
+) {
+    for f in module.converted_functions.drain(..) {
+        let mut v = module.path.clone();
+        v.push(f.name.clone());
+        out.insert(v, f);
+    }
+    for (m, _vis) in module.submodules.values_mut() {
+        get_all_converted_functions(m, out);
+    }
+}
+
 impl<W: Write> CodeGen<W> {
     pub fn new(module: Module, writer: W) -> Self {
         Self {
@@ -811,29 +840,42 @@ impl<W: Write> CodeGen<W> {
     }
 
     pub fn compile(&mut self) -> Result<(), CodeGenError> {
-        let mut converted_functions = std::mem::take(&mut self.module.converted_functions);
+        let mut converted_functions = HashMap::new();
+        get_all_converted_functions(&mut self.module, &mut converted_functions);
 
         writeln!(self.writer, r#"format ELF64"#)?;
         writeln!(self.writer, r#"section ".text" executable"#)?;
 
-        writeln!(self.writer, r#"public ?main as "main""#)?;
+        writeln!(
+            self.writer,
+            r#"public ?{}$main as "main""#,
+            self.module.path.join("$")
+        )?;
         writeln!(self.writer)?;
 
-        for f in self.module.functions.values() {
+        let mut functions = HashMap::new();
+        get_all_functions(&self.module, &mut functions);
+        for (path, f) in functions {
             if f.external {
-                writeln!(self.writer, "extrn {0:?} as ?{0}", f.linker_name)?;
+                writeln!(
+                    self.writer,
+                    "extrn {:?} as ?{}",
+                    f.linker_name,
+                    path.join("$")
+                )?;
             }
         }
         writeln!(self.writer)?;
 
-        for f in converted_functions.extract_if(.., |f| f.linker_name != "main") {
+        for (path, f) in converted_functions {
             self.type_stack.clear();
-            self.type_stack
-                .extend_from_slice(&self.module.functions[&f.name].args);
-            self.compile_function(f, false)?;
+            let (signature, module) = self.module.resolve_path(&path[1..]).unwrap();
+            self.type_stack.extend_from_slice(&signature.args);
+            let is_main = module.path == self.module.path && path[1] == "main";
+            self.compile_function(path, f, is_main)?;
         }
 
-        self.compile_main_function(converted_functions)?;
+        // self.compile_main_function(converted_functions)?;
 
         self.data.write(&mut self.writer)?;
         Ok(())
@@ -866,24 +908,26 @@ impl<W: Write> CodeGen<W> {
             });
         }
 
-        self.compile_function(main_ir, true)?;
+        // TODO: self.compile_function(main_ir, true)?;
 
         Ok(())
     }
 
     fn compile_function(
         &mut self,
+        path: Vec<String>,
         f: ConvertedFunction,
         // this is a very very very dirty hack....
         // TODO: C/Linux calling convention
         is_main: bool,
     ) -> Result<(), CodeGenError> {
-        let func = &self.module.functions[&f.name];
+        let (func, module) = self.module.resolve_path(&path[1..]).unwrap();
+        let module = module.light_clone();
 
         self.type_stack.clear();
         self.type_stack.extend_from_slice(&func.args);
 
-        writeln!(self.writer, "?{}:", f.linker_name)?;
+        writeln!(self.writer, "?{}:", path.join("$"))?;
 
         if is_main {
             writeln!(self.writer, "    push rbp")?;
@@ -937,9 +981,9 @@ impl<W: Write> CodeGen<W> {
             // writeln!(self.writer, "    mov [rsp+{}], rax", func.args.len() * 8)?;
         }
 
-        let name = f.name.clone();
-        self.compile_body(f.body)?;
-        let func = &self.module.functions[&name];
+        dbg!(&module.path, f.name);
+        self.compile_body(f.body, &module)?;
+        let (func, _module) = &self.module.resolve_path(&path[1..]).unwrap();
 
         if is_main {
             writeln!(self.writer, "    mov rax, 0")?;
@@ -989,14 +1033,14 @@ impl<W: Write> CodeGen<W> {
         Ok(())
     }
 
-    fn compile_body(&mut self, body: Vec<Ir>) -> Result<(), CodeGenError> {
+    fn compile_body(&mut self, body: Vec<Ir>, module: &Module) -> Result<(), CodeGenError> {
         for ir in body {
-            self.compile_ir(ir)?;
+            self.compile_ir(ir, module)?;
         }
         Ok(())
     }
 
-    fn compile_ir(&mut self, ir: Ir) -> Result<(), CodeGenError> {
+    fn compile_ir(&mut self, ir: Ir, module: &Module) -> Result<(), CodeGenError> {
         match ir.kind {
             IrKind::PushInt(n, ty) => {
                 self.type_stack.push(ty.into());
@@ -1040,7 +1084,7 @@ impl<W: Write> CodeGen<W> {
                 // writeln!(self.writer, "    push {}", label)?;
             }
             IrKind::CallFn(ident) => {
-                self.compile_function_call(ident)?;
+                self.compile_function_call(ident, module)?;
             }
             IrKind::CallBuiltin(builtin) => {
                 let (consumed, returns) = builtin.type_check(ir.span, &self.type_stack)?;
@@ -1049,8 +1093,8 @@ impl<W: Write> CodeGen<W> {
                 self.type_stack.truncate(len - consumed);
                 self.type_stack.extend_from_slice(&returns);
             }
-            IrKind::Then(then) => self.compile_then(then)?,
-            IrKind::While(whil) => self.compile_while(whil)?,
+            IrKind::Then(then) => self.compile_then(then, module)?,
+            IrKind::While(whil) => self.compile_while(whil, module)?,
             IrKind::Break(id) => {
                 writeln!(self.writer, "    jmp .{}_break", id)?;
             }
@@ -1061,8 +1105,8 @@ impl<W: Write> CodeGen<W> {
         Ok(())
     }
 
-    fn compile_then(&mut self, then: ThenIr) -> Result<(), CodeGenError> {
-        let id = then.then_span.offset();
+    fn compile_then(&mut self, then: ThenIr, module: &Module) -> Result<(), CodeGenError> {
+        let id = then.then_span.start();
         self.type_stack.pop_type(then.then_span, &ty!(bool))?;
 
         writeln!(self.writer, "    popq rax")?;
@@ -1074,7 +1118,7 @@ impl<W: Write> CodeGen<W> {
         }
 
         let start = self.type_stack.clone();
-        self.compile_body(then.body)?;
+        self.compile_body(then.body, module)?;
         let mut after_then = self.type_stack.clone();
         writeln!(self.writer, "    jmp .then_end_{}", id)?;
 
@@ -1082,7 +1126,7 @@ impl<W: Write> CodeGen<W> {
         for (i, et) in then.else_thens.into_iter().enumerate() {
             let _ = std::mem::replace(&mut self.type_stack, start.clone());
             writeln!(self.writer, ".else_{}_{}:", id, i)?;
-            self.compile_body(et.condition)?;
+            self.compile_body(et.condition, module)?;
             self.type_stack.pop_type(then.then_span, &Type::Bool)?;
             writeln!(self.writer, "    popq rax")?;
             writeln!(self.writer, "    cmp rax, 0")?;
@@ -1093,14 +1137,14 @@ impl<W: Write> CodeGen<W> {
                 writeln!(self.writer, "    je .else_{}_{}", id, i + 1)?;
             }
 
-            self.compile_body(et.body)?;
+            self.compile_body(et.body, module)?;
             writeln!(self.writer, "    jmp .then_end_{}", id)?;
         }
 
         if !then.elze.is_empty() {
             let _ = std::mem::replace(&mut self.type_stack, start.clone());
             writeln!(self.writer, ".else_{}_{}:", id, et_len)?;
-            self.compile_body(then.elze)?;
+            self.compile_body(then.elze, module)?;
         }
         std::mem::swap(&mut self.type_stack, &mut after_then);
         writeln!(self.writer, ".then_end_{}:", id)?;
@@ -1108,7 +1152,7 @@ impl<W: Write> CodeGen<W> {
         Ok(())
     }
 
-    fn compile_while(&mut self, whil: WhileIr) -> Result<(), CodeGenError> {
+    fn compile_while(&mut self, whil: WhileIr, module: &Module) -> Result<(), CodeGenError> {
         let id = whil.loop_id;
         let start = self.type_stack.clone();
 
@@ -1126,10 +1170,10 @@ impl<W: Write> CodeGen<W> {
 
         writeln!(self.writer, "    jmp .{}_end", id)?;
         writeln!(self.writer, ".{}:", id)?;
-        self.compile_body(whil.body)?;
+        self.compile_body(whil.body, module)?;
         assert!(start.matches(&self.type_stack));
         writeln!(self.writer, ".{}_end:", id)?;
-        self.compile_body(whil.condition)?;
+        self.compile_body(whil.condition, module)?;
         self.type_stack.pop_type(whil.condition_span, &Type::Bool)?;
         writeln!(self.writer, "    popq rax")?;
         writeln!(self.writer, "    cmp rax, 0")?;
@@ -1140,14 +1184,14 @@ impl<W: Write> CodeGen<W> {
         Ok(())
     }
 
-    fn compile_function_call(&mut self, ident: Ident) -> Result<(), CodeGenError> {
-        let f = &self.module.functions[&ident.ident];
+    fn compile_function_call(&mut self, ident: Ident, module: &Module) -> Result<(), CodeGenError> {
+        let f = module.resolve_ident(&ident.path)?;
 
         let mut register_i = 0;
         let mut float_i = 0;
         let mut argi = 0;
         for _ in 0..ident.arity.map(|x| x as usize).unwrap_or(f.args.len()) {
-            let ty = self.type_stack.pop(ident.span)?;
+            let ty = self.type_stack.pop(ident.span())?;
             let arg_ty = if argi < f.args.len() {
                 let arg_ty = &f.args[f.args.len() - argi - 1];
                 if argi < f.args.len() {
@@ -1194,7 +1238,19 @@ impl<W: Write> CodeGen<W> {
         self.type_stack.extend_from_slice(&f.returns);
         // TODO: What should go in rax?
         writeln!(self.writer, "    mov rax, {}", float_i)?;
-        writeln!(self.writer, "    call ?{}", f.linker_name)?;
+
+        dbg!((&module.path, &f.name));
+        writeln!(
+            self.writer,
+            "    call ?{}${}",
+            module.path.join("$"),
+            ident
+                .path
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>()
+                .join("$")
+        )?;
 
         // Push first argument back onto the stack
         if let Some(ret) = f.returns.first() {

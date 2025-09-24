@@ -11,8 +11,6 @@ pub struct SubCmd {
     pub lex: bool,
     #[clap(short, long)]
     pub ir: bool,
-    #[clap(long)]
-    pub old: bool,
 }
 
 #[derive(Debug, Clone, Parser)]
