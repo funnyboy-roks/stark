@@ -77,7 +77,13 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
         let ast = parser.parse_module()?;
         let mut module = Module::new(
             ast,
-            vec![cli.file.with_extension("").to_string_lossy().to_string()],
+            vec![cli
+                .file
+                .with_extension("")
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
             cli.file.clone(),
             content,
             false,
@@ -109,7 +115,13 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
         let ast = parser.parse_module()?;
         let mut module = Module::new(
             ast,
-            vec![cli.file.with_extension("").to_string_lossy().to_string()],
+            vec![cli
+                .file
+                .with_extension("")
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
             cli.file.clone(),
             content,
             false,
