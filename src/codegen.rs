@@ -981,7 +981,6 @@ impl<W: Write> CodeGen<W> {
             // writeln!(self.writer, "    mov [rsp+{}], rax", func.args.len() * 8)?;
         }
 
-        dbg!(&module.path, f.name);
         self.compile_body(f.body, &module)?;
         let (func, _module) = &self.module.resolve_path(&path[1..]).unwrap();
 
@@ -1239,7 +1238,6 @@ impl<W: Write> CodeGen<W> {
         // TODO: What should go in rax?
         writeln!(self.writer, "    mov rax, {}", float_i)?;
 
-        dbg!((&module.path, &f.name));
         writeln!(
             self.writer,
             "    call ?{}${}",
