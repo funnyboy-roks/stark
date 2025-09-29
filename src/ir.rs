@@ -69,6 +69,11 @@ pub enum IrGenError {
         #[label = "here"]
         span: Span,
     },
+    #[error("Unexpected module reference.  Expected a function reference.")]
+    UnexpectedModule {
+        #[label = "here"]
+        span: Span,
+    },
     #[error("Cannot find file for module '{name}', checked paths: {checked_paths:?}")]
     MissingModuleFile {
         name: String,
@@ -89,7 +94,7 @@ pub enum IrGenError {
     #[error("{}", .0)]
     #[diagnostic(transparent)]
     ModuleIrGenError(miette::Report),
-    #[error("Attempt to call private function '{name}'")]
+    #[error("Attempt to access private function '{name}'")]
     PrivateFunction {
         name: String,
         #[label = "here"]
@@ -1622,7 +1627,20 @@ impl DerefMut for TypeStack {
     }
 }
 
-// TODO: names are very hard
+pub enum ResolvedIdent<'a> {
+    Function(&'a FunctionSignature),
+    Module(&'a Module),
+}
+
+impl<'a> ResolvedIdent<'a> {
+    pub fn unwrap_function(self) -> &'a FunctionSignature {
+        match self {
+            ResolvedIdent::Function(f) => f,
+            ResolvedIdent::Module(_) => panic!("Expected function, found module"),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Module {
     /// The ASTs for the module
@@ -1660,10 +1678,12 @@ impl Module {
         }
     }
 
+    /// Recursively clone this module, only cloning information about the module, not the file
+    /// content or compiled content.
     pub fn light_clone(&self) -> Self {
         Self {
             asts: self.asts.clone(),
-            quiet: self.quiet.clone(),
+            quiet: self.quiet,
             path: self.path.clone(),
             filepath: self.filepath.clone(),
             content: Default::default(),
@@ -1682,17 +1702,28 @@ impl Module {
         &self,
         path: &[PathElement],
         depth: usize,
-    ) -> Result<(&FunctionSignature, &Module), IrGenError> {
+    ) -> Result<(ResolvedIdent<'_>, &Module), IrGenError> {
         match path {
             [] => unreachable!("paths can not be empty"),
             [last] => {
-                let f =
-                    self.functions
-                        .get(&last.name)
-                        .ok_or_else(|| IrGenError::UndefinedSymbol {
-                            ident: last.name.clone(),
+                let f = if let Some(i) = self.imports.get(&last.name) {
+                    return self.resolve_ident_rec(&i, 1);
+                } else if let Some(f) = self.functions.get(&last.name) {
+                    ResolvedIdent::Function(f)
+                } else if let Some((m, vis)) = self.submodules.get(&last.name) {
+                    if depth > 1 && *vis == Visibility::Private {
+                        return Err(IrGenError::PrivateModule {
+                            name: m.path.last().unwrap().clone(),
                             span: last.span(),
-                        })?;
+                        });
+                    }
+                    ResolvedIdent::Module(m)
+                } else {
+                    return Err(IrGenError::UndefinedSymbol {
+                        ident: last.name.clone(),
+                        span: last.span(),
+                    });
+                };
                 Ok((f, self))
             }
             [next, rest @ ..] => {
@@ -1715,19 +1746,23 @@ impl Module {
         }
     }
 
-    pub fn resolve_ident(&self, path: &Path) -> Result<&FunctionSignature, IrGenError> {
+    pub fn resolve_ident(&self, path: &Path) -> Result<(ResolvedIdent<'_>, &Module), IrGenError> {
         assert!(!path.is_root); // TODO root paths
-        let (f, _module) = self.resolve_ident_rec(path, 1)?;
-        if path.len() > 1 && f.visibility != Visibility::Public {
+        let (f, module) = self.resolve_ident_rec(path, 1)?;
+        if path.len() > 1
+            && let ResolvedIdent::Function(f) = f
+            && f.visibility != Visibility::Public
+        {
             return Err(IrGenError::PrivateFunction {
                 name: f.name.clone(),
                 span: path.span(),
             });
         }
-        Ok(f)
+        Ok((f, module))
     }
 
     pub fn resolve_path(&self, path: &[String]) -> Option<(&FunctionSignature, &Module)> {
+        // TODO: This may resolve to more than just functions
         match path {
             [] => unreachable!("paths can not be empty"),
             [last] => self.functions.get(last).map(|f| (f, self)),
@@ -1862,7 +1897,14 @@ impl Module {
                     self.submodules
                         .insert(module.name.clone(), (parsed, module.visibility));
                 }
-                Ast::Import(_) => todo!("import"),
+                Ast::Import(import) => {
+                    if import.visibility != Visibility::Private {
+                        todo!("Non-private import visibility");
+                    }
+                    // TODO: remove these clones
+                    self.imports
+                        .insert(import.name.clone(), import.path.clone());
+                }
             }
         }
         Ok(())
@@ -1912,8 +1954,15 @@ impl Module {
         }
         match ast {
             Ast::Ident(ident) => {
-                let f = self.resolve_ident(&ident.path)?;
-                f.apply(&ident, type_stack)?;
+                let (f, _) = self.resolve_ident(&ident.path)?;
+                match f {
+                    ResolvedIdent::Function(f) => f.apply(&ident, type_stack)?,
+                    ResolvedIdent::Module(_) => {
+                        return Err(IrGenError::UnexpectedModule {
+                            span: ident.path.span(),
+                        })
+                    }
+                }
                 out.push(Ir::new(ident.span(), IrKind::CallFn(ident)));
             }
             Ast::Atom(atom) => match atom.kind {
@@ -2161,7 +2210,11 @@ impl Module {
                 wrap_miette(module.compile_module(), &module.filepath, &module.content)
                     .map_err(IrGenError::ModuleIrGenError)?;
             }
-            Ast::Import(_) => todo!("import"),
+            Ast::Import(import) => {
+                eprintln!("use {:?} as {}", import.path, import.name);
+                // ensure that imports are correct, but emit no IR
+                self.resolve_ident(&import.path)?;
+            }
             Ast::Then(_) => todo!(),
             Ast::While(_) => todo!(),
             Ast::Cast(_) => todo!(),
@@ -2209,8 +2262,15 @@ pub fn update_stacks(
             type_stack.push(Type::FatPointer);
         }
         IrKind::CallFn(ref ident) => {
-            let f = module.resolve_ident(&ident.path)?;
-            f.apply(ident, type_stack)?;
+            let (f, _) = module.resolve_ident(&ident.path)?;
+            match f {
+                ResolvedIdent::Function(f) => f.apply(ident, type_stack)?,
+                ResolvedIdent::Module(_) => {
+                    return Err(IrGenError::UnexpectedModule {
+                        span: ident.path.span(),
+                    })
+                }
+            }
             // TODO const fn
             ir_stack.push(ir);
         }

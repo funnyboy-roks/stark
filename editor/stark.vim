@@ -47,7 +47,7 @@ syntax keyword starkBuiltin load store
 syntax keyword starkKeyword extern
 syntax keyword starkKeyword fn use nextgroup=starkPath skipwhite skipempty
 syntax keyword starkKeyword swap drop break
-syntax keyword starkKeyword pub mod
+syntax keyword starkKeyword pub mod as
 
 syntax match starkKeyword /\<cast(.[^)]\+)/ contains=starkType
 syntax match starkKeyword /\<dup\((\d\+)\)\?\%([^[:cntrl:][:space:][:punct:]]\|_\)\@!/ contains=starkDecNumber,starkHexNumber,starkBinNumber

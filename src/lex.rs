@@ -29,6 +29,7 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "pub" => TokenValue::Pub,
     "mod" => TokenValue::Mod,
     "use" => TokenValue::Use,
+    "as" => TokenValue::As,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -127,6 +128,8 @@ pub enum TokenKind {
     Mod,
     /// `use`
     Use,
+    /// `as`
+    As,
 
     Then,
     Else,
@@ -192,6 +195,8 @@ pub enum TokenValue {
     Mod,
     /// `use`
     Use,
+    /// `as`
+    As,
 
     Then,
     Else,
@@ -242,6 +247,7 @@ impl TokenValue {
             TokenValue::Pub => TokenKind::Pub,
             TokenValue::Mod => TokenKind::Mod,
             TokenValue::Use => TokenKind::Use,
+            TokenValue::As => TokenKind::As,
             TokenValue::Cast => TokenKind::Cast,
             TokenValue::Void => TokenKind::Void,
             TokenValue::Load => TokenKind::Load,

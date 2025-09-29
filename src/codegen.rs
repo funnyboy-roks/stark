@@ -1184,7 +1184,8 @@ impl<W: Write> CodeGen<W> {
     }
 
     fn compile_function_call(&mut self, ident: Ident, module: &Module) -> Result<(), CodeGenError> {
-        let f = module.resolve_ident(&ident.path)?;
+        let (f, _) = module.resolve_ident(&ident.path)?;
+        let f = f.unwrap_function();
 
         let mut register_i = 0;
         let mut float_i = 0;
@@ -1238,16 +1239,13 @@ impl<W: Write> CodeGen<W> {
         // TODO: What should go in rax?
         writeln!(self.writer, "    mov rax, {}", float_i)?;
 
+        let (resolved_f, module) = module.resolve_ident(&ident.path)?;
+        let resolved_f = resolved_f.unwrap_function();
         writeln!(
             self.writer,
             "    call ?{}${}",
             module.path.join("$"),
-            ident
-                .path
-                .iter()
-                .map(|p| p.name.clone())
-                .collect::<Vec<_>>()
-                .join("$")
+            resolved_f.linker_name
         )?;
 
         // Push first argument back onto the stack

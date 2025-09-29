@@ -1,3 +1,5 @@
+#![allow(clippy::len_zero)]
+
 use std::{
     fs::File,
     io::{BufReader, Cursor},
@@ -9,7 +11,7 @@ use lex::Lexer;
 use miette::{highlighters::SyntectHighlighter, NamedSource};
 use syntect::highlighting::ThemeSet;
 
-use crate::{cli::Cli, ir::Module, parse::Visibility};
+use crate::{cli::Cli, ir::Module};
 
 pub mod cli;
 // pub mod eval;

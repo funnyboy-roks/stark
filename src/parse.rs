@@ -32,6 +32,16 @@ pub struct Path {
     span: Span,
 }
 
+impl Path {
+    pub fn last(&self) -> &PathElement {
+        assert!(
+            self.len() >= 1,
+            "Path should always contain at least one elemnt"
+        );
+        &self[self.len() - 1]
+    }
+}
+
 impl Spanned for Path {
     fn span(&self) -> Span {
         self.span
@@ -166,6 +176,7 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Pub => Err(()),
             TokenValue::Mod => Err(()),
             TokenValue::Use => Err(()),
+            TokenValue::As => Err(()),
         }
     }
 }
@@ -253,9 +264,11 @@ impl Spanned for ModuleDeclaration {
 /// ```stark
 /// pub use foo::bar;
 /// use foo::bar;
+/// use foo::bar as baz;
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Import {
+    pub name: String,
     pub path: Path,
     pub visibility: Visibility,
     span: Span,
@@ -998,6 +1011,7 @@ impl<'a> Parser<'a> {
                 TokenValue::Pub => todo!(),
                 TokenValue::Mod => todo!(),
                 TokenValue::Use => todo!(),
+                TokenValue::As => todo!(),
             }
         }
 
@@ -1107,12 +1121,20 @@ impl<'a> Parser<'a> {
                 TokenValue::Use => {
                     let (ident, _) = expect_token!(self, Ident(_));
                     let path = self.take_path(ident)?;
+                    let name = if try_expect_token!(self, As).is_some() {
+                        let (_name_token, name) = expect_token!(self, Ident(_));
+                        name
+                    } else {
+                        path.last().name.clone()
+                    };
                     out.push(Ast::Import(Import {
                         span: token.span() + path.span(),
                         visibility: Visibility::Private,
+                        name,
                         path,
                     }));
                 }
+                TokenValue::As => Err(ParseError::unexpected_token(token, &[]))?,
             }
         }
 
