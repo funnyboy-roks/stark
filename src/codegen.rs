@@ -875,41 +875,7 @@ impl<W: Write> CodeGen<W> {
             self.compile_function(path, f, is_main)?;
         }
 
-        // self.compile_main_function(converted_functions)?;
-
         self.data.write(&mut self.writer)?;
-        Ok(())
-    }
-
-    fn compile_main_function(
-        &mut self,
-        mut fns: Vec<ConvertedFunction>,
-    ) -> Result<(), CodeGenError> {
-        let main = self
-            .module
-            .functions
-            .get("main")
-            .ok_or(CodeGenError::MissingMain)?;
-        let main_ir = fns.pop().unwrap();
-
-        if !main.args.is_empty()
-            && !main
-                .args
-                .matches(&TypeStack::from(vec![ty!(u32), ty!(**i8)]))
-        {
-            return Err(CodeGenError::InvalidMain {
-                span: main.ident_span,
-            });
-        }
-
-        if !main.returns.is_empty() && !main.returns.matches(&TypeStack::from(vec![ty!(i32)])) {
-            return Err(CodeGenError::InvalidMain {
-                span: main.ident_span,
-            });
-        }
-
-        // TODO: self.compile_function(main_ir, true)?;
-
         Ok(())
     }
 

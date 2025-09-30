@@ -1,4 +1,7 @@
-use std::ops::{Add, AddAssign, Bound, Range, RangeBounds};
+use std::{
+    iter::Sum,
+    ops::{Add, AddAssign, Bound, Range, RangeBounds},
+};
 
 use miette::SourceSpan;
 
@@ -13,6 +16,11 @@ pub struct Span {
 }
 
 impl Span {
+    const FULL_SPAN: Self = Self {
+        start: usize::MAX,
+        end: usize::MIN,
+    };
+
     pub fn new(range: impl RangeBounds<usize>) -> Self {
         let (start, end) = match (range.start_bound(), range.end_bound()) {
             (Bound::Included(&s), Bound::Included(&e)) => (s, e + 1),
@@ -35,11 +43,30 @@ impl Span {
     pub fn end(&self) -> usize {
         self.end
     }
+
+    pub const fn empty() -> Self {
+        Self { start: 0, end: 0 }
+    }
 }
 
 impl std::fmt::Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}..{}", self.start, self.end)
+    }
+}
+
+impl Sum for Span {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut span = Self::FULL_SPAN;
+        for x in iter {
+            span += x;
+        }
+
+        if span == Self::FULL_SPAN {
+            Self::empty()
+        } else {
+            span
+        }
     }
 }
 

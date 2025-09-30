@@ -93,6 +93,10 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
         module.scan_functions()?;
         module.compile_module()?;
         fn print_module(module: &Module, indent: usize) {
+            eprintln!("{1:>0$}Imports:", indent * 4, "");
+            for (from, to) in &module.imports {
+                eprintln!("{1:>0$}    {2:?} => {3:?}", indent * 4, "", from, to);
+            }
             eprintln!("{1:>0$}Function Signatures:", indent * 4, "");
             for x in &module.functions {
                 eprintln!("{1:>0$}    {2}", indent * 4, "", x.1);
@@ -126,7 +130,7 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
                 .to_string()],
             cli.file.clone(),
             content,
-            false,
+            true,
         );
         module.scan_functions()?;
         module.compile_module()?;

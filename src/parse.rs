@@ -26,13 +26,22 @@ impl Spanned for PathElement {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Path {
-    pub inner: Vec<PathElement>,
+    inner: Vec<PathElement>,
     /// This path starts with `::`
     pub is_root: bool,
     span: Span,
 }
 
 impl Path {
+    pub fn from_vec(vec: Vec<PathElement>, is_root: bool) -> Self {
+        let span = vec.iter().map(|e| e.span()).sum();
+        Self {
+            inner: vec,
+            span,
+            is_root,
+        }
+    }
+
     pub fn last(&self) -> &PathElement {
         assert!(
             self.len() >= 1,
@@ -260,21 +269,42 @@ impl Spanned for ModuleDeclaration {
     }
 }
 
-// TODO: tree imports: use foo::{bar, baz::qux};
 /// ```stark
-/// pub use foo::bar;
-/// use foo::bar;
-/// use foo::bar as baz;
+/// use foo::bar
+/// use foo::bar
+/// use foo::bar as baz
+/// use foo::(bar baz)
+/// use foo::(bar baz as qux)
+/// use foo::(bar baz::qux::(quux corge))
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct Import {
-    pub name: String,
-    pub path: Path,
+    pub tree: ImportTree,
     pub visibility: Visibility,
+    pub is_root: bool,
     span: Span,
 }
 
 impl Spanned for Import {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportTree {
+    pub value: ImportTreeValue,
+    pub name: PathElement,
+    span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportTreeValue {
+    Vertex { children: Vec<ImportTree> },
+    Leaf { rename: Option<String> },
+}
+
+impl Spanned for ImportTree {
     fn span(&self) -> Span {
         self.span
     }
@@ -801,6 +831,52 @@ impl<'a> Parser<'a> {
         Ok(Ident { path, arity, span })
     }
 
+    fn take_import_tree(&mut self) -> Result<ImportTree, ParseError> {
+        let (token, name) = expect_token!(self, Ident(_));
+        let name = PathElement {
+            name,
+            span: token.span(),
+        };
+
+        if try_expect_token!(self, PathSep).is_none() {
+            let (span, rename) = if try_expect_token!(self, As).is_some() {
+                let (rn_token, rename) = expect_token!(self, Ident(_));
+                (token.span() + rn_token.span(), Some(rename))
+            } else {
+                (token.span(), None)
+            };
+            return Ok(ImportTree {
+                span,
+                name,
+                value: ImportTreeValue::Leaf { rename },
+            });
+        }
+
+        let (span, value) = if try_expect_token!(self, LParen).is_some() {
+            let mut children = Vec::new();
+            let mut span = token.span();
+            loop {
+                let tree = self.take_import_tree()?;
+                span += tree.span();
+                children.push(tree);
+                if try_expect_token!(self, RParen).is_some() {
+                    break;
+                }
+            }
+            (span, ImportTreeValue::Vertex { children })
+        } else {
+            let tree = self.take_import_tree()?;
+            (
+                token.span() + tree.span(),
+                ImportTreeValue::Vertex {
+                    children: vec![tree],
+                },
+            )
+        };
+
+        Ok(ImportTree { span, value, name })
+    }
+
     fn take_fn(&mut self, vis: Visibility) -> Result<Fn, ParseError> {
         // expect_token!(self, Extern);
         // expect_token!(self, Fn);
@@ -1119,19 +1195,13 @@ impl<'a> Parser<'a> {
                     }));
                 }
                 TokenValue::Use => {
-                    let (ident, _) = expect_token!(self, Ident(_));
-                    let path = self.take_path(ident)?;
-                    let name = if try_expect_token!(self, As).is_some() {
-                        let (_name_token, name) = expect_token!(self, Ident(_));
-                        name
-                    } else {
-                        path.last().name.clone()
-                    };
+                    let is_root = try_expect_token!(self, PathSep).is_some();
+                    let tree = self.take_import_tree()?;
                     out.push(Ast::Import(Import {
-                        span: token.span() + path.span(),
+                        span: token.span() + tree.span(),
                         visibility: Visibility::Private,
-                        name,
-                        path,
+                        tree,
+                        is_root,
                     }));
                 }
                 TokenValue::As => Err(ParseError::unexpected_token(token, &[]))?,

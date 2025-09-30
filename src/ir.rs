@@ -12,7 +12,8 @@ use thiserror::Error;
 use crate::{
     lex::{Lexer, NumLitVal},
     parse::{
-        Ast, AtomKind, Ident, ModuleDeclaration, Parser, Path, PathElement, TypeAtom, Visibility,
+        Ast, AtomKind, Ident, ImportTree, ImportTreeValue, ModuleDeclaration, Parser, Path,
+        PathElement, TypeAtom, Visibility,
     },
     span::{Span, Spanned},
 };
@@ -1707,7 +1708,7 @@ impl Module {
             [] => unreachable!("paths can not be empty"),
             [last] => {
                 let f = if let Some(i) = self.imports.get(&last.name) {
-                    return self.resolve_ident_rec(&i, 1);
+                    return self.resolve_ident_rec(i, 1);
                 } else if let Some(f) = self.functions.get(&last.name) {
                     ResolvedIdent::Function(f)
                 } else if let Some((m, vis)) = self.submodules.get(&last.name) {
@@ -1770,7 +1771,15 @@ impl Module {
         }
     }
 
+    pub fn check_imports(&self) -> Result<(), IrGenError> {
+        for (_, path) in self.imports.iter() {
+            self.resolve_ident(path)?;
+        }
+        Ok(())
+    }
+
     pub fn compile_module(&mut self) -> Result<(), IrGenError> {
+        self.check_imports()?;
         for ast in std::mem::take(&mut self.asts) {
             self.module_ast(ast)?;
         }
@@ -1901,13 +1910,43 @@ impl Module {
                     if import.visibility != Visibility::Private {
                         todo!("Non-private import visibility");
                     }
-                    // TODO: remove these clones
-                    self.imports
-                        .insert(import.name.clone(), import.path.clone());
+                    Self::add_imports(&mut self.imports, &import.tree, &mut vec![], import.is_root);
+                    // TODO
+                    // self.imports
+                    //     .insert(import.name.clone(), import.path.clone());
                 }
             }
         }
         Ok(())
+    }
+
+    fn add_imports(
+        imports: &mut HashMap<String, Path>,
+        tree: &ImportTree,
+        current: &mut Vec<PathElement>,
+        is_root: bool,
+    ) {
+        match &tree.value {
+            ImportTreeValue::Vertex { children } => {
+                assert!(!children.is_empty());
+                current.push(tree.name.clone());
+                for child in children {
+                    Self::add_imports(imports, child, current, is_root);
+                }
+                current.pop();
+            }
+            ImportTreeValue::Leaf { rename } => {
+                // push before to prevent the re-allocation of pushing after clone
+                current.push(tree.name.clone());
+                let path = current.clone();
+                current.pop();
+
+                imports.insert(
+                    rename.clone().unwrap_or_else(|| tree.name.name.clone()),
+                    Path::from_vec(path, is_root),
+                );
+            }
+        }
     }
 
     fn compile_body(
@@ -2210,11 +2249,7 @@ impl Module {
                 wrap_miette(module.compile_module(), &module.filepath, &module.content)
                     .map_err(IrGenError::ModuleIrGenError)?;
             }
-            Ast::Import(import) => {
-                eprintln!("use {:?} as {}", import.path, import.name);
-                // ensure that imports are correct, but emit no IR
-                self.resolve_ident(&import.path)?;
-            }
+            Ast::Import(_) => {}
             Ast::Then(_) => todo!(),
             Ast::While(_) => todo!(),
             Ast::Cast(_) => todo!(),
