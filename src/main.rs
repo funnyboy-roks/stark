@@ -89,6 +89,7 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
             cli.file.clone(),
             content,
             false,
+            None,
         );
         module.scan_functions()?;
         module.compile_module()?;
@@ -131,6 +132,7 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
             cli.file.clone(),
             content,
             true,
+            None,
         );
         module.scan_functions()?;
         module.compile_module()?;

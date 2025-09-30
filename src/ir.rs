@@ -4,6 +4,7 @@ use std::{
     fmt::{Debug, Display},
     ops::{Deref, DerefMut},
     path::PathBuf,
+    rc::Rc,
 };
 
 use miette::{Diagnostic, NamedSource};
@@ -1648,6 +1649,7 @@ pub struct Module {
     asts: Vec<Ast>,
 
     quiet: bool,
+    root: Option<Rc<Module>>,
 
     pub path: Vec<String>,
     pub filepath: PathBuf,
@@ -1665,10 +1667,12 @@ impl Module {
         filepath: PathBuf,
         content: String,
         quiet: bool,
+        root: Option<Rc<Module>>,
     ) -> Self {
         Self {
             asts,
             quiet,
+            root,
             path,
             filepath,
             content,
@@ -1685,6 +1689,7 @@ impl Module {
         Self {
             asts: self.asts.clone(),
             quiet: self.quiet,
+            root: self.root.as_ref().map(Rc::clone),
             path: self.path.clone(),
             filepath: self.filepath.clone(),
             content: Default::default(),
@@ -1748,8 +1753,12 @@ impl Module {
     }
 
     pub fn resolve_ident(&self, path: &Path) -> Result<(ResolvedIdent<'_>, &Module), IrGenError> {
-        assert!(!path.is_root); // TODO root paths
-        let (f, module) = self.resolve_ident_rec(path, 1)?;
+        let module = if path.is_root {
+            self.root.as_deref().unwrap_or(self)
+        } else {
+            self
+        };
+        let (f, module) = module.resolve_ident_rec(path, 1)?;
         if path.len() > 1
             && let ResolvedIdent::Function(f) = f
             && f.visibility != Visibility::Public
@@ -1817,7 +1826,19 @@ impl Module {
             .map_err(IrGenError::ModuleParseError)?;
         let mut new_path = self.path.clone();
         new_path.push(module.name.clone());
-        let mut module = Module::new(ast, new_path, path.clone(), content, self.quiet);
+        let mut module = Module::new(
+            ast,
+            new_path,
+            path.clone(),
+            content,
+            self.quiet,
+            Some(
+                self.root
+                    .as_ref()
+                    .map(Rc::clone)
+                    .unwrap_or_else(|| Rc::new(self.light_clone())),
+            ),
+        );
         wrap_miette(module.scan_functions(), path, &module.content)
             .map_err(IrGenError::ModuleIrGenError)?;
         Ok(module)
@@ -1911,9 +1932,6 @@ impl Module {
                         todo!("Non-private import visibility");
                     }
                     Self::add_imports(&mut self.imports, &import.tree, &mut vec![], import.is_root);
-                    // TODO
-                    // self.imports
-                    //     .insert(import.name.clone(), import.path.clone());
                 }
             }
         }
