@@ -1649,6 +1649,7 @@ pub struct Module {
     asts: Vec<Ast>,
 
     quiet: bool,
+    /// None until `update_root` called
     root: Option<Rc<Module>>,
 
     pub path: Vec<String>,
@@ -1667,12 +1668,11 @@ impl Module {
         filepath: PathBuf,
         content: String,
         quiet: bool,
-        root: Option<Rc<Module>>,
     ) -> Self {
         Self {
             asts,
             quiet,
-            root,
+            root: None,
             path,
             filepath,
             content,
@@ -1713,7 +1713,7 @@ impl Module {
             [] => unreachable!("paths can not be empty"),
             [last] => {
                 let f = if let Some(i) = self.imports.get(&last.name) {
-                    return self.resolve_ident_rec(i, 1);
+                    return self.resolve_ident(i);
                 } else if let Some(f) = self.functions.get(&last.name) {
                     ResolvedIdent::Function(f)
                 } else if let Some((m, vis)) = self.submodules.get(&last.name) {
@@ -1826,19 +1826,7 @@ impl Module {
             .map_err(IrGenError::ModuleParseError)?;
         let mut new_path = self.path.clone();
         new_path.push(module.name.clone());
-        let mut module = Module::new(
-            ast,
-            new_path,
-            path.clone(),
-            content,
-            self.quiet,
-            Some(
-                self.root
-                    .as_ref()
-                    .map(Rc::clone)
-                    .unwrap_or_else(|| Rc::new(self.light_clone())),
-            ),
-        );
+        let mut module = Module::new(ast, new_path, path.clone(), content, self.quiet);
         wrap_miette(module.scan_functions(), path, &module.content)
             .map_err(IrGenError::ModuleIrGenError)?;
         Ok(module)
@@ -1936,6 +1924,13 @@ impl Module {
             }
         }
         Ok(())
+    }
+
+    pub fn update_roots(&mut self, root: Rc<Module>) {
+        self.root = Some(Rc::clone(&root));
+        for (m, _) in self.submodules.values_mut() {
+            m.update_roots(Rc::clone(&root));
+        }
     }
 
     fn add_imports(

@@ -4,6 +4,7 @@ use std::{
     fs::File,
     io::{BufReader, Cursor},
     path::Path,
+    rc::Rc,
 };
 
 use clap::Parser;
@@ -89,9 +90,9 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
             cli.file.clone(),
             content,
             false,
-            None,
         );
         module.scan_functions()?;
+        module.update_roots(Rc::new(module.light_clone()));
         module.compile_module()?;
         fn print_module(module: &Module, indent: usize) {
             eprintln!("{1:>0$}Imports:", indent * 4, "");
@@ -132,9 +133,9 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
             cli.file.clone(),
             content,
             true,
-            None,
         );
         module.scan_functions()?;
+        module.update_roots(Rc::new(module.light_clone()));
         module.compile_module()?;
 
         let out_path = cli

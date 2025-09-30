@@ -60,7 +60,7 @@ impl Spanned for Path {
 impl std::fmt::Debug for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, elt) in self.inner.iter().enumerate() {
-            if i != 0 && !self.is_root {
+            if i != 0 || self.is_root {
                 f.write_str("::")?;
             }
             f.write_str(&elt.name)?;
@@ -591,13 +591,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn peek_token(&'a mut self) -> Result<Option<&'a Token>, ParseError> {
-        match self.tokens.peek().map(Result::as_ref).transpose() {
-            Ok(t) => Ok(t),
-            Err(e) => Err(e.clone().into()),
-        }
-    }
-
     fn take_type(&mut self) -> Result<(TypeAtom, Span), ParseError> {
         let Some(token) = self.tokens.next() else {
             return Err(ParseError::UnexpectedEof {
@@ -762,7 +755,7 @@ impl<'a> Parser<'a> {
                 true
             }
             _ => {
-                // unreachable is probably more accurate, but just in case, but that's okay
+                // unreachable is probably more accurate, but let's error just in case
                 return Err(ParseError::unexpected_token(
                     taken,
                     &[TokenKind::Ident, TokenKind::PathSep],
