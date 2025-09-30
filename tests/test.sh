@@ -80,7 +80,7 @@ test_single() {
 
 test_all() {
     count=0
-    for file in $(find . -iname '*.st' -type f); do
+    for file in $(find . -maxdepth 1 -iname '*.st' -type f); do
         set +e
         test_single "${file%.st}"
         local st=$?

@@ -1,7 +1,10 @@
+#![allow(clippy::len_zero)]
+
 use std::{
     fs::File,
     io::{BufReader, Cursor},
     path::Path,
+    rc::Rc,
 };
 
 use clap::Parser;
@@ -12,13 +15,13 @@ use syntect::highlighting::ThemeSet;
 use crate::{cli::Cli, ir::Module};
 
 pub mod cli;
-pub mod compile;
 // pub mod eval;
 pub mod codegen;
 pub mod hash_float;
 pub mod ir;
 pub mod lex;
 pub mod parse;
+pub mod span;
 
 fn main() -> Result<(), miette::Error> {
     let cli = cli::Cli::parse();
@@ -69,49 +72,70 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
     } else if cli.subcmd.parse {
         eprintln!("parsing...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse()?;
+        let ast = parser.parse_module()?;
         dbg!(ast);
     } else if cli.subcmd.ir {
         eprintln!("generating ir...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse()?;
-        let mut module = Module::new(ast, false);
-        module.compile_module()?;
-
-        eprintln!(
-            "[{}:{}:{}] maker.functions = {:?}",
-            file!(),
-            line!(),
-            column!(),
-            module.functions,
+        let ast = parser.parse_module()?;
+        let mut module = Module::new(
+            ast,
+            vec![cli
+                .file
+                .with_extension("")
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
+            cli.file.clone(),
+            content,
+            false,
         );
-        eprintln!("Function Signatures:");
-        for x in &module.functions {
-            eprintln!("    {}", x.1);
-        }
-        eprintln!("Functions:");
-        for x in &module.converted_functions {
-            eprintln!("    {}:", x.linker_name);
-            for y in &x.body {
-                eprintln!("        {:?}", y.kind);
+        module.scan_functions()?;
+        module.update_roots(Rc::new(module.light_clone()));
+        module.compile_module()?;
+        fn print_module(module: &Module, indent: usize) {
+            eprintln!("{1:>0$}Imports:", indent * 4, "");
+            for (from, to) in &module.imports {
+                eprintln!("{1:>0$}    {2:?} => {3:?}", indent * 4, "", from, to);
+            }
+            eprintln!("{1:>0$}Function Signatures:", indent * 4, "");
+            for x in &module.functions {
+                eprintln!("{1:>0$}    {2}", indent * 4, "", x.1);
+            }
+            eprintln!("{1:>0$}Functions:", indent * 4, "");
+            for x in &module.converted_functions {
+                eprintln!("{1:>0$}    {2}:", indent * 4, "", x.linker_name);
+                for y in &x.body {
+                    eprintln!("{1:>0$}        {2:?}", indent * 4, "", y.kind);
+                }
+            }
+            eprintln!("{1:>0$}Submodules:", indent * 4, "");
+            for (name, (module, vis)) in &module.submodules {
+                eprintln!("{1:>0$}    {vis:?} mod {name}:", indent * 4, "");
+                print_module(module, indent + 2);
             }
         }
-    } else if cli.subcmd.old {
-        eprintln!("compiling...");
-        let asm_path = cli
-            .asm_out
-            .as_deref()
-            .unwrap_or_else(|| Path::new(cli.file.file_name().unwrap()))
-            .with_extension("s");
-        let mut asm_file = File::create(asm_path).unwrap();
-        let parser = parse::Parser::new(lex);
-        let ast = parser.parse()?;
-        let comp = compile::Compiler::new(cli, &ast, &mut asm_file);
-        comp.compile()?;
+
+        print_module(&module, 1);
     } else {
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse()?;
-        let mut module = Module::new(ast, true);
+        let ast = parser.parse_module()?;
+        let mut module = Module::new(
+            ast,
+            vec![cli
+                .file
+                .with_extension("")
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()],
+            cli.file.clone(),
+            content,
+            true,
+        );
+        module.scan_functions()?;
+        module.update_roots(Rc::new(module.light_clone()));
         module.compile_module()?;
 
         let out_path = cli

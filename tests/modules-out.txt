@@ -1,0 +1,8 @@
+STDOUT:
+    hello from main through libc::printf
+    hello from mod_test::hello
+
+STDERR:
+
+
+STATUS: 0

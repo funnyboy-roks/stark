@@ -2,12 +2,13 @@ use std::{
     borrow::Cow,
     ffi::CString,
     num::{ParseFloatError, ParseIntError},
-    ops::Range,
 };
 
-use miette::{Diagnostic, SourceSpan};
+use miette::Diagnostic;
 use phf::phf_map;
 use thiserror::Error;
+
+use crate::span::{Span, Spanned};
 
 const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "dup" => TokenValue::Dup,
@@ -25,6 +26,10 @@ const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "void" => TokenValue::Void,
     "load" => TokenValue::Load,
     "store" => TokenValue::Store,
+    "pub" => TokenValue::Pub,
+    "mod" => TokenValue::Mod,
+    "use" => TokenValue::Use,
+    "as" => TokenValue::As,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,17 +104,32 @@ pub enum TokenKind {
     Ellipsis,
     /// `->`
     Arrow,
+    /// `::`
+    PathSep,
 
-    // Keywords
+    // Builtins
     Dup,
     Swap,
     Drop,
-    Extern,
-    Fn,
     Cast,
-    Void,
     Load,
     Store,
+
+    // Keywords
+    /// `extern`
+    Extern,
+    /// `fn`
+    Fn,
+    /// `void`
+    Void,
+    /// `pub`
+    Pub,
+    /// `mod`
+    Mod,
+    /// `use`
+    Use,
+    /// `as`
+    As,
 
     Then,
     Else,
@@ -151,17 +171,32 @@ pub enum TokenValue {
     Ellipsis,
     /// `->`
     Arrow,
+    /// `::`
+    PathSep,
 
-    // Keywords
+    // Builtins
     Dup,
     Swap,
     Drop,
-    Extern,
-    Fn,
     Cast,
-    Void,
     Load,
     Store,
+
+    // Keywords
+    /// `extern`
+    Extern,
+    /// `fn`
+    Fn,
+    /// `void`
+    Void,
+    /// `pub`
+    Pub,
+    /// `mod`
+    Mod,
+    /// `use`
+    Use,
+    /// `as`
+    As,
 
     Then,
     Else,
@@ -202,12 +237,17 @@ impl TokenValue {
             TokenValue::Gte => TokenKind::Gte,
             TokenValue::Percent => TokenKind::Percent,
             TokenValue::Ellipsis => TokenKind::Ellipsis,
+            TokenValue::PathSep => TokenKind::PathSep,
             TokenValue::Arrow => TokenKind::Arrow,
             TokenValue::Dup => TokenKind::Dup,
             TokenValue::Swap => TokenKind::Swap,
             TokenValue::Drop => TokenKind::Drop,
             TokenValue::Extern => TokenKind::Extern,
             TokenValue::Fn => TokenKind::Fn,
+            TokenValue::Pub => TokenKind::Pub,
+            TokenValue::Mod => TokenKind::Mod,
+            TokenValue::Use => TokenKind::Use,
+            TokenValue::As => TokenKind::As,
             TokenValue::Cast => TokenKind::Cast,
             TokenValue::Void => TokenKind::Void,
             TokenValue::Load => TokenKind::Load,
@@ -223,8 +263,14 @@ impl TokenValue {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub file: String,
-    pub span: SourceSpan,
+    span: Span,
     pub value: TokenValue,
+}
+
+impl Spanned for Token {
+    fn span(&self) -> Span {
+        self.span
+    }
 }
 
 impl Token {
@@ -238,52 +284,52 @@ pub enum LexError {
     #[error("Unexpected token '{found}'")]
     UnexpectedCharacter {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
         found: char,
     },
     #[error("Unexpected char '{found}', expected one of {expected:?}.")]
     UnexpectedCharacterExpected {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
         expected: Vec<char>,
         found: char,
     },
     #[error("Unexpected end of file")]
     UnexpectedEof {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
     },
     #[error("Unterminated string literal")]
     UnterminatedStringLiteral {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
     },
     #[error("Error parsing integer")]
     IntParseError {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
         #[source]
         source: ParseIntError,
     },
     #[error("Error parsing float")]
     FloatParseError {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
         #[source]
         source: ParseFloatError,
     },
     #[error("{} float literals are not supported", .kind)]
     UnsupportedFloat {
         #[label = "here"]
-        span: SourceSpan,
+        span: Span,
         kind: String,
     },
 }
 
 impl Token {
-    pub fn new(range: Range<usize>, file: impl Into<String>, kind: TokenValue) -> Token {
+    pub fn new(span: impl Into<Span>, file: impl Into<String>, kind: TokenValue) -> Token {
         Token {
-            span: range.into(),
+            span: span.into(),
             file: file.into(),
             value: kind,
         }
@@ -328,7 +374,7 @@ impl<'a> Lexer<'a> {
 
         let mut begin = num.chars();
         let first = begin.next().ok_or(LexError::UnexpectedEof {
-            span: (self.offset..self.offset + 1).into(),
+            span: Span::new(self.offset..=self.offset),
         })?;
         let second = begin.next();
 
@@ -365,7 +411,7 @@ impl<'a> Lexer<'a> {
             }
             ('0', Some(c @ ('a'..='z' | 'A'..='Z' | '_'))) => {
                 return Err(LexError::UnexpectedCharacter {
-                    span: (self.offset..self.offset + 1).into(),
+                    span: Span::new(self.offset..=self.offset),
                     found: c,
                 });
             }
@@ -386,7 +432,7 @@ impl<'a> Lexer<'a> {
 
         if float && radix != Radix::Dec {
             return Err(LexError::UnsupportedFloat {
-                span: (start..self.offset).into(),
+                span: Span::new(start..self.offset),
                 kind: match radix {
                     Radix::Bin => "Binary".into(),
                     Radix::Dec => unreachable!(),
@@ -404,7 +450,7 @@ impl<'a> Lexer<'a> {
                     radix,
                 })
                 .map_err(|e| LexError::FloatParseError {
-                    span: (start..self.offset).into(),
+                    span: Span::new(start..self.offset),
                     source: e,
                 })
         } else {
@@ -414,7 +460,7 @@ impl<'a> Lexer<'a> {
                     radix,
                 })
                 .map_err(|e| LexError::IntParseError {
-                    span: (start..self.offset).into(),
+                    span: Span::new(start..self.offset),
                     source: e,
                 })
         }
@@ -504,7 +550,7 @@ impl<'a> Lexer<'a> {
             end += c.len_utf8();
         }
         Err(LexError::UnterminatedStringLiteral {
-            span: (start - 1..self.content.len()).into(),
+            span: Span::new(start - 1..self.content.len()),
         })
     }
 
@@ -529,10 +575,10 @@ impl<'a> Lexer<'a> {
             }
             let mut chars = self.content[self.offset..].chars();
             let c1 = chars.next().ok_or(LexError::UnexpectedEof {
-                span: (self.offset..self.offset + 1).into(),
+                span: Span::new(self.offset..=self.offset),
             })?;
             let c2 = chars.next().ok_or(LexError::UnexpectedEof {
-                span: (self.offset..self.offset + 1).into(),
+                span: Span::new(self.offset..=self.offset),
             })?;
 
             match (c1, c2) {
@@ -554,7 +600,7 @@ impl<'a> Lexer<'a> {
             }
         }
         Err(LexError::UnexpectedEof {
-            span: (self.offset..self.offset + 1).into(),
+            span: Span::new(self.offset..=self.offset),
         })
     }
 }
@@ -624,6 +670,14 @@ impl Iterator for Lexer<'_> {
                     return Some(self.take_ident().map(|n| {
                         Token::new(start..self.offset, self.file, TokenValue::from_ident(&n))
                     }));
+                }
+                (':', Some(':')) => {
+                    self.offset += 2;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::PathSep,
+                    )));
                 }
                 (';', _) => {
                     self.offset += 1;

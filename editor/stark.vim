@@ -28,6 +28,7 @@ hi def link starkConditional  Conditional
 hi def link starkRepeat       Repeat
 hi def link starkType         Type
 hi def link starkBuiltin      Function
+hi def link starkPathSep      Keyword
 
 hi def link starkFuncName     Function
 
@@ -44,12 +45,18 @@ syntax match starkVariadic /\.\.\./
 syntax keyword starkBuiltin load store
 
 syntax keyword starkKeyword extern
-syntax keyword starkKeyword fn nextgroup=starkFuncName skipwhite skipempty
+syntax keyword starkKeyword fn use nextgroup=starkPath skipwhite skipempty
 syntax keyword starkKeyword swap drop break
+syntax keyword starkKeyword pub mod as
 
-syntax match   starkKeyword /\<cast(.[^)]\+)/ contains=starkType
-syntax match   starkKeyword /\<dup\((\d\+)\)\?\%([^[:cntrl:][:space:][:punct:]]\|_\)\@!/ contains=starkDecNumber,starkHexNumber,starkBinNumber
+syntax match starkKeyword /\<cast(.[^)]\+)/ contains=starkType
+syntax match starkKeyword /\<dup\((\d\+)\)\?\%([^[:cntrl:][:space:][:punct:]]\|_\)\@!/ contains=starkDecNumber,starkHexNumber,starkBinNumber
 
+syntax match starkPathSep  /::/
+" Highlight 'foo::' in 'foo::bar'
+syntax match starkPath     /\(\(\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*\)\+::\)\+/ contains=starkFuncName,starkPathSep
+" Highlight 'foo::bar' in 'mod foo::bar'
+syntax match starkPath     /\(\(\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*\)\+\(::\)\?\)\+/ contains=starkFuncName,starkPathSep contained
 syntax match starkFuncName /\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*/ display contained
 
 syntax keyword starkBoolean true false
