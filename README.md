@@ -57,9 +57,8 @@ c"\n" printf drop
         - [x] Ideally use linux calling convention so we can export the
           functions for use from other langauges
 - [ ] Macros
-- [ ] Modules
-    - [ ] Imports
-    - [ ] Namespaces
+- [x] Modules
+    - [x] Imports
 - [x] Linking with libc
 - [ ] Better CLI
 - [ ] structs
