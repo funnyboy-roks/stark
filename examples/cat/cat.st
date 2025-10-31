@@ -15,12 +15,12 @@ fn main {
     c"rb" swap fopen
     32 1 calloc
     while true {
-        dup2
+        dup(2)
         31 swap
         1 swap
         fread
 
-        dup2 c"%.*s" printf(3)
+        dup(2) c"%.*s" printf(3)
 
         31 < then {
             break
