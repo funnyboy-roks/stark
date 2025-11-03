@@ -16,7 +16,7 @@ pub struct Span {
 }
 
 impl Span {
-    const FULL_SPAN: Self = Self {
+    const NONE: Self = Self {
         start: usize::MAX,
         end: usize::MIN,
     };
@@ -44,6 +44,10 @@ impl Span {
         self.end
     }
 
+    pub const fn none() -> Self {
+        Self::NONE
+    }
+
     pub const fn empty() -> Self {
         Self { start: 0, end: 0 }
     }
@@ -57,12 +61,12 @@ impl std::fmt::Debug for Span {
 
 impl Sum for Span {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        let mut span = Self::FULL_SPAN;
+        let mut span = Self::NONE;
         for x in iter {
             span += x;
         }
 
-        if span == Self::FULL_SPAN {
+        if span == Self::NONE {
             Self::empty()
         } else {
             span

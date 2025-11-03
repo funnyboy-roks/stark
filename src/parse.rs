@@ -221,11 +221,12 @@ pub struct ExternFn {
     pub args: Vec<TypeAtom>,
     pub variadic: bool,
     pub returns: Vec<TypeAtom>,
+    span: Span,
 }
 
 impl Spanned for ExternFn {
     fn span(&self) -> Span {
-        todo!()
+        self.span
     }
 }
 
@@ -237,11 +238,12 @@ pub struct Fn {
     pub args: Vec<TypeAtom>,
     pub returns: Vec<TypeAtom>,
     pub body: Vec<Ast>,
+    span: Span,
 }
 
 impl Spanned for Fn {
     fn span(&self) -> Span {
-        todo!()
+        self.span
     }
 }
 
@@ -524,31 +526,33 @@ impl ParseError {
 macro_rules! expect_token {
     ($self: ident, $ident: ident) => {{
         let Some(token) = $self.tokens.next() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "token".into(),
                 matching: None,
-            }
-            .into());
+            }]);
         };
 
-        let token = token?;
+        let token = token.map_err(|e| vec![e.into()])?;
 
         match token.value {
             TokenValue::$ident => (token, ()),
             _ => {
-                return Err(ParseError::unexpected_token(token, &[TokenKind::$ident]));
+                return Err(vec![ParseError::unexpected_token(
+                    token,
+                    &[TokenKind::$ident],
+                )]);
             }
         }
     }};
     ($self: ident, $ident: ident(_)) => {{
         let Some(token) = $self.tokens.next() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "token".into(),
                 matching: None,
-            });
+            }]);
         };
 
-        let token = token?;
+        let token = token.map_err(|e| vec![e.into()])?;
 
         match token.value {
             TokenValue::$ident(ref x) => {
@@ -556,7 +560,10 @@ macro_rules! expect_token {
                 (token, x)
             }
             _ => {
-                return Err(ParseError::unexpected_token(token, &[TokenKind::$ident]));
+                return Err(vec![ParseError::unexpected_token(
+                    token,
+                    &[TokenKind::$ident],
+                )]);
             }
         }
     }};
@@ -575,7 +582,11 @@ macro_rules! try_expect_token {
 
             match token.value {
                 TokenValue::$ident => {
-                    let token = $self.tokens.next().expect("checked above")?;
+                    let token = $self
+                        .tokens
+                        .next()
+                        .expect("checked above")
+                        .map_err(|e| vec![e.into()])?;
                     Some(token)
                 }
                 _ => None,
@@ -591,15 +602,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_type(&mut self) -> Result<(TypeAtom, Span), ParseError> {
+    fn take_type(&mut self) -> Result<(TypeAtom, Span), Vec<ParseError>> {
         let Some(token) = self.tokens.next() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "type".into(),
                 matching: None,
-            });
+            }]);
         };
 
-        let token = token?;
+        let token = token.map_err(|e| vec![e.into()])?;
         let span = token.span();
         match token.value {
             TokenValue::Asterisk => {
@@ -619,22 +630,27 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenValue::Ident(ident) => Ok((TypeAtom::Ident(ident), span)),
-            _ => Err(ParseError::unexpected_token(
+            _ => Err(vec![ParseError::unexpected_token(
                 token,
                 &[TokenKind::Ident, TokenKind::Asterisk],
-            )),
+            )]),
         }
     }
 
-    fn take_args(&mut self, allow_variadic: bool) -> Result<(Vec<TypeAtom>, bool), ParseError> {
+    fn take_args(
+        &mut self,
+        allow_variadic: bool,
+    ) -> Result<(Vec<TypeAtom>, bool, Span), Vec<ParseError>> {
         let mut args = Vec::new();
         let mut variadic = false;
+        let mut span = Span::none();
         while let Some(t) = self.tokens.peek() {
             if t.is_err() {
                 let t = self.tokens.next().expect("peek is some");
-                return Err(t.expect_err("t.is_err() called above").into());
+                return Err(vec![t.expect_err("t.is_err() called above").into()]);
             }
-            let t = t.as_ref().unwrap();
+            let t = t.as_ref().expect("checked above");
+            span += t.span();
             match t.value {
                 TokenValue::Ident(_) if !variadic => {
                     let (ty, _) = self.take_type()?;
@@ -645,22 +661,22 @@ impl<'a> Parser<'a> {
                     args.push(ty);
                 }
                 TokenValue::RParen => {
-                    let _ = self.tokens.next().unwrap()?;
+                    let _ = self.tokens.next().unwrap().map_err(|e| vec![e.into()])?;
                     break;
                 }
                 TokenValue::Ellipsis if !variadic => {
-                    let t = self.tokens.next().unwrap()?;
+                    let t = self.tokens.next().unwrap().map_err(|e| vec![e.into()])?;
                     if !allow_variadic {
-                        return Err(ParseError::unexpected_token(
+                        return Err(vec![ParseError::unexpected_token(
                             t,
                             &[TokenKind::Ident, TokenKind::RParen],
-                        ));
+                        )]);
                     }
                     variadic = true;
                 }
                 _ => {
-                    let t = self.tokens.next().unwrap()?;
-                    return Err(ParseError::unexpected_token(
+                    let t = self.tokens.next().unwrap().map_err(|e| vec![e.into()])?;
+                    return Err(vec![ParseError::unexpected_token(
                         t,
                         if variadic {
                             &[TokenKind::RParen]
@@ -669,60 +685,70 @@ impl<'a> Parser<'a> {
                         } else {
                             &[TokenKind::Ident, TokenKind::RParen]
                         },
-                    ));
+                    )]);
                 }
             }
         }
-        Ok((args, variadic))
+        Ok((args, variadic, span))
     }
 
-    fn take_extern_fn(&mut self, vis: Visibility) -> Result<ExternFn, ParseError> {
+    fn take_extern_fn(
+        &mut self,
+        vis: Visibility,
+        extern_span: Span,
+    ) -> Result<ExternFn, Vec<ParseError>> {
+        let mut span = extern_span;
         // expect_token!(self, Extern);
         expect_token!(self, Fn);
         let (ident_token, ident) = expect_token!(self, Ident(_));
+        span += ident_token.span();
 
         let Some(next) = self.tokens.peek() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "token".into(),
                 matching: None,
-            });
+            }]);
         };
-        let next = next.as_ref().map_err(|e| e.clone())?;
-        let (args, variadic) = match next.kind() {
+        let next = next.as_ref().map_err(|e| vec![e.clone().into()])?;
+        span += next.span();
+        let (args, variadic, args_span) = match next.kind() {
             TokenKind::LParen => {
                 expect_token!(self, LParen);
                 self.take_args(true)?
             }
-            TokenKind::Arrow => (Vec::new(), false),
-            TokenKind::Semicolon => (Vec::new(), false),
+            TokenKind::Arrow => (Vec::new(), false, next.span()),
+            TokenKind::Semicolon => (Vec::new(), false, next.span()),
             _ => {
-                return Err(ParseError::unexpected_token(
+                return Err(vec![ParseError::unexpected_token(
                     self.tokens.next().unwrap().expect("error checked above"),
                     &[TokenKind::LCurly, TokenKind::Arrow],
-                ));
+                )]);
             }
         };
+        span += args_span;
 
         let Some(next) = self.tokens.next() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "token".into(),
                 matching: None,
-            });
+            }]);
         };
-        let next = next?;
+        let next = next.map_err(|e| vec![e.into()])?;
+        span += next.span();
         let returns = match next.kind() {
             TokenKind::Semicolon => Vec::new(),
             TokenKind::Arrow => {
                 expect_token!(self, LParen);
-                let (returns, _) = self.take_args(false)?;
+                let (returns, _, ret_span) = self.take_args(false)?;
+                span += ret_span;
                 expect_token!(self, Semicolon);
                 returns
             }
             _ => {
-                return Err(ParseError::unexpected_token(
+                return Err(vec![ParseError::unexpected_token(
                     next,
                     &[TokenKind::LCurly, TokenKind::Arrow],
-                ));
+                )]);
             }
         };
 
@@ -734,10 +760,11 @@ impl<'a> Parser<'a> {
             args,
             variadic,
             returns,
+            span,
         })
     }
 
-    fn take_path(&mut self, taken: Token) -> Result<Path, ParseError> {
+    fn take_path(&mut self, taken: Token) -> Result<Path, Vec<ParseError>> {
         let mut span = taken.span();
         let mut path: Vec<PathElement> = Vec::new();
         let is_root = match taken.value {
@@ -756,10 +783,10 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 // unreachable is probably more accurate, but let's error just in case
-                return Err(ParseError::unexpected_token(
+                return Err(vec![ParseError::unexpected_token(
                     taken,
                     &[TokenKind::Ident, TokenKind::PathSep],
-                ));
+                )]);
             }
         };
 
@@ -782,7 +809,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn take_arity(&mut self) -> Result<Option<(u32, Span)>, ParseError> {
+    fn take_arity(&mut self) -> Result<Option<(u32, Span)>, Vec<ParseError>> {
         let Some(lparen) = try_expect_token!(self, LParen) else {
             return Ok(None);
         };
@@ -792,27 +819,27 @@ impl<'a> Parser<'a> {
         let n = match n.value {
             NumLitVal::Integer(n) => {
                 if !(1..=u32::MAX as _).contains(&n) {
-                    return Err(ParseError::IntegerOutOfBounds {
+                    return Err(vec![ParseError::IntegerOutOfBounds {
                         span: num.span(),
                         found: n,
                         min: 1,
                         max: u32::MAX.into(),
-                    });
+                    }]);
                 }
                 n
             }
             NumLitVal::Float(val) => {
-                return Err(ParseError::ExpectedInteger {
+                return Err(vec![ParseError::ExpectedInteger {
                     span: num.span(),
                     found: val,
-                });
+                }]);
             }
         };
 
         Ok(Some((n as u32, lparen.span() + rparen.span())))
     }
 
-    fn take_ident(&mut self, taken: Token) -> Result<Ident, ParseError> {
+    fn take_ident(&mut self, taken: Token) -> Result<Ident, Vec<ParseError>> {
         let path = self.take_path(taken)?;
 
         let (arity, span) = if let Some((arity, span)) = self.take_arity()? {
@@ -824,7 +851,7 @@ impl<'a> Parser<'a> {
         Ok(Ident { path, arity, span })
     }
 
-    fn take_import_tree(&mut self) -> Result<ImportTree, ParseError> {
+    fn take_import_tree(&mut self) -> Result<ImportTree, Vec<ParseError>> {
         let (token, name) = expect_token!(self, Ident(_));
         let name = PathElement {
             name,
@@ -870,58 +897,64 @@ impl<'a> Parser<'a> {
         Ok(ImportTree { span, value, name })
     }
 
-    fn take_fn(&mut self, vis: Visibility) -> Result<Fn, ParseError> {
-        // expect_token!(self, Extern);
+    fn take_fn(&mut self, vis: Visibility, fn_span: Span) -> Result<Fn, Vec<ParseError>> {
         // expect_token!(self, Fn);
+        let mut span = fn_span;
         let (ident_token, ident) = expect_token!(self, Ident(_));
+        span += ident_token.span();
 
         let Some(next) = self.tokens.peek() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "token".into(),
                 matching: None,
-            });
+            }]);
         };
-        let next = next.as_ref().map_err(|e| e.clone())?;
-        let (args, _) = match next.kind() {
+        let next = next.as_ref().map_err(|e| vec![e.clone().into()])?;
+        span += next.span();
+        let (args, _, args_span) = match next.kind() {
             TokenKind::LParen => {
                 expect_token!(self, LParen);
                 // TODO: allow variadic?
                 self.take_args(false)?
             }
-            TokenKind::Arrow => (Vec::new(), false),
-            TokenKind::LCurly => (Vec::new(), false),
+            TokenKind::Arrow => (Vec::new(), false, next.span()),
+            TokenKind::LCurly => (Vec::new(), false, next.span()),
             _ => {
-                return Err(ParseError::unexpected_token(
+                return Err(vec![ParseError::unexpected_token(
                     self.tokens.next().unwrap().expect("error checked above"),
                     &[TokenKind::LCurly, TokenKind::Arrow],
-                ));
+                )]);
             }
         };
+        span += args_span;
 
         let Some(next) = self.tokens.next() else {
-            return Err(ParseError::UnexpectedEof {
+            return Err(vec![ParseError::UnexpectedEof {
                 expected: "token".into(),
                 matching: None,
-            });
+            }]);
         };
-        let next = next?;
+        let next = next.map_err(|e| vec![e.into()])?;
+        span += next.span();
         let (returns, body_open) = match next.kind() {
             TokenKind::LCurly => (Vec::new(), next),
             TokenKind::Arrow => {
                 expect_token!(self, LParen);
-                let (returns, _) = self.take_args(false)?;
+                let (returns, _, ret_span) = self.take_args(false)?;
+                span += ret_span;
                 let (body_open, ()) = expect_token!(self, LCurly);
                 (returns, body_open)
             }
             _ => {
-                return Err(ParseError::unexpected_token(
+                return Err(vec![ParseError::unexpected_token(
                     next,
                     &[TokenKind::LCurly, TokenKind::Arrow],
-                ));
+                )]);
             }
         };
 
-        let (body, _) = self.parse_body(TokenKind::RCurly, Some(&body_open))?;
+        let (body, r_curly) = self.parse_body(TokenKind::RCurly, Some(&body_open))?;
+        span += r_curly.span();
 
         Ok(Fn {
             visibility: vis,
@@ -930,10 +963,11 @@ impl<'a> Parser<'a> {
             args,
             returns,
             body,
+            span,
         })
     }
 
-    fn take_cast(&mut self, cast_token: Token) -> Result<Cast, ParseError> {
+    fn take_cast(&mut self, cast_token: Token) -> Result<Cast, Vec<ParseError>> {
         let (group_start, _) = expect_token!(self, LParen);
         let (target, target_span) = self.take_type()?;
         let (group_end, _) = expect_token!(self, RParen);
@@ -945,7 +979,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn take_then(&mut self, then_token: Token) -> Result<Then, ParseError> {
+    fn take_then(&mut self, then_token: Token) -> Result<Then, Vec<ParseError>> {
         // expect_token!(self, Then);
         let (body_start, _) = expect_token!(self, LCurly);
         let (body, body_end) = self.parse_body(TokenKind::RCurly, Some(&then_token))?;
@@ -990,8 +1024,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_while(&mut self, while_token: Token) -> Result<While, ParseError> {
-        // expect_token!(self, Then);
+    fn take_while(&mut self, while_token: Token) -> Result<While, Vec<ParseError>> {
+        // expect_token!(self, While);
         let (condition, l_curly) = self.parse_body(TokenKind::LCurly, Some(&while_token))?;
         let (body, r_curly) = self.parse_body(TokenKind::RCurly, Some(&l_curly))?;
 
@@ -1013,194 +1047,230 @@ impl<'a> Parser<'a> {
         &mut self,
         end_token: TokenKind,
         open_token: Option<&Token>,
-    ) -> Result<(Vec<Ast>, Token), ParseError> {
+    ) -> Result<(Vec<Ast>, Token), Vec<ParseError>> {
         let mut out = Vec::new();
+        let mut errors = Vec::new();
 
         while let Some(token) = self.tokens.next() {
-            let token = token?;
-            if token.kind() == end_token {
-                return Ok((out, token));
-            }
-            match token.value {
-                TokenValue::PathSep | TokenValue::Ident(_) => {
-                    let ident = self.take_ident(token)?;
-                    out.push(Ast::Ident(ident));
+            let x = || {
+                let token = token.map_err(|e| vec![e.into()])?;
+                if token.kind() == end_token {
+                    return Ok(Some((std::mem::take(&mut out), token)));
                 }
-                TokenValue::LParen => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::RParen => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::LCurly => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::RCurly => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Semicolon => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::StrLit(_)
-                | TokenValue::CStrLit(_)
-                | TokenValue::NumLit(_)
-                | TokenValue::BoolLit(_)
-                | TokenValue::Plus
-                | TokenValue::Minus
-                | TokenValue::Asterisk
-                | TokenValue::Slash
-                | TokenValue::Equal
-                | TokenValue::Not
-                | TokenValue::Neq
-                | TokenValue::Lt
-                | TokenValue::Lte
-                | TokenValue::Gt
-                | TokenValue::Gte
-                | TokenValue::Percent
-                | TokenValue::Swap
-                | TokenValue::Drop
-                | TokenValue::Load
-                | TokenValue::Store
-                | TokenValue::Break => out.push(Ast::Atom(token.try_into()?)),
-                TokenValue::Ellipsis => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Arrow => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Extern => Err(ParseError::NestedFunction { span: token.span() })?,
-                TokenValue::Fn => Err(ParseError::NestedFunction { span: token.span() })?,
-                TokenValue::Cast => {
-                    out.push(Ast::Cast(self.take_cast(token)?));
-                }
-                TokenValue::Dup => {
-                    let (count, span) = if let Some((arity, span)) = self.take_arity()? {
-                        (arity, token.span() + span)
-                    } else {
-                        (1, token.span())
-                    };
+                match token.value {
+                    TokenValue::PathSep | TokenValue::Ident(_) => {
+                        let ident = self.take_ident(token)?;
+                        out.push(Ast::Ident(ident));
+                    }
+                    TokenValue::LParen => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::RParen => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::LCurly => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::RCurly => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::Semicolon => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::StrLit(_)
+                    | TokenValue::CStrLit(_)
+                    | TokenValue::NumLit(_)
+                    | TokenValue::BoolLit(_)
+                    | TokenValue::Plus
+                    | TokenValue::Minus
+                    | TokenValue::Asterisk
+                    | TokenValue::Slash
+                    | TokenValue::Equal
+                    | TokenValue::Not
+                    | TokenValue::Neq
+                    | TokenValue::Lt
+                    | TokenValue::Lte
+                    | TokenValue::Gt
+                    | TokenValue::Gte
+                    | TokenValue::Percent
+                    | TokenValue::Swap
+                    | TokenValue::Drop
+                    | TokenValue::Load
+                    | TokenValue::Store
+                    | TokenValue::Break => {
+                        out.push(Ast::Atom(Atom::try_from(token).map_err(|e| vec![e])?))
+                    }
+                    TokenValue::Ellipsis => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::Arrow => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::Extern => {
+                        let f = self.take_extern_fn(Visibility::Private, token.span())?;
+                        Err(vec![ParseError::NestedFunction { span: f.span() }])?
+                    }
+                    TokenValue::Fn => {
+                        let f = self.take_fn(Visibility::Private, token.span())?;
+                        Err(vec![ParseError::NestedFunction { span: f.span() }])?
+                    }
+                    TokenValue::Cast => {
+                        out.push(Ast::Cast(self.take_cast(token)?));
+                    }
+                    TokenValue::Dup => {
+                        let (count, span) = if let Some((arity, span)) = self.take_arity()? {
+                            (arity, token.span() + span)
+                        } else {
+                            (1, token.span())
+                        };
 
-                    out.push(Ast::Dup(Dup { span, count }));
+                        out.push(Ast::Dup(Dup { span, count }));
+                    }
+                    TokenValue::Void => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::Then => {
+                        let t = self.take_then(token)?;
+                        out.push(Ast::Then(t));
+                    }
+                    TokenValue::Else => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::While => {
+                        out.push(Ast::While(self.take_while(token)?));
+                    }
+                    TokenValue::Pub => todo!(),
+                    TokenValue::Mod => todo!(),
+                    TokenValue::Use => todo!(),
+                    TokenValue::As => todo!(),
                 }
-                TokenValue::Void => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Then => {
-                    let t = self.take_then(token)?;
-                    out.push(Ast::Then(t));
-                }
-                TokenValue::Else => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::While => {
-                    out.push(Ast::While(self.take_while(token)?));
-                }
-                TokenValue::Pub => todo!(),
-                TokenValue::Mod => todo!(),
-                TokenValue::Use => todo!(),
-                TokenValue::As => todo!(),
+                Result::<_, Vec<ParseError>>::Ok(None)
+            };
+            match x() {
+                Ok(Some(v)) if errors.is_empty() => return Ok(v),
+                Ok(Some(_)) => return Err(errors),
+                Ok(_) => {}
+                Err(e) => errors.extend(e),
             }
         }
 
-        Err(ParseError::UnexpectedEof {
+        errors.push(ParseError::UnexpectedEof {
             expected: format!("{:?}", end_token),
             matching: open_token.map(|t| t.span()),
-        })
+        });
+        Err(errors)
     }
 
-    pub fn parse_module(mut self) -> Result<Vec<Ast>, ParseError> {
+    pub fn parse_module(mut self) -> Result<Vec<Ast>, Vec<ParseError>> {
         let mut out = Vec::new();
 
+        let mut errors = Vec::new();
+
         while let Some(token) = self.tokens.next() {
-            let token = token?;
-            match token.value {
-                TokenValue::PathSep
-                | TokenValue::Ident(_)
-                | TokenValue::LParen
-                | TokenValue::RParen
-                | TokenValue::LCurly
-                | TokenValue::RCurly
-                | TokenValue::Semicolon
-                | TokenValue::StrLit(_)
-                | TokenValue::CStrLit(_)
-                | TokenValue::NumLit(_)
-                | TokenValue::BoolLit(_)
-                | TokenValue::Plus
-                | TokenValue::Minus
-                | TokenValue::Asterisk
-                | TokenValue::Slash
-                | TokenValue::Not
-                | TokenValue::Neq
-                | TokenValue::Lt
-                | TokenValue::Lte
-                | TokenValue::Gt
-                | TokenValue::Gte
-                | TokenValue::Percent
-                | TokenValue::Equal
-                | TokenValue::Swap
-                | TokenValue::Drop
-                | TokenValue::Load
-                | TokenValue::Store
-                | TokenValue::Break
-                | TokenValue::Dup
-                | TokenValue::Ellipsis
-                | TokenValue::Arrow
-                | TokenValue::Then
-                | TokenValue::Else
-                | TokenValue::While
-                | TokenValue::Cast
-                | TokenValue::Void => Err(ParseError::unexpected_token(token, &[]))?,
-                TokenValue::Extern => {
-                    let f = self.take_extern_fn(Visibility::Private)?;
-                    out.push(Ast::ExternFn(f));
-                }
-                TokenValue::Fn => {
-                    let f = self.take_fn(Visibility::Private)?;
-                    out.push(Ast::Fn(f));
-                }
-                TokenValue::Pub => 'a: {
-                    if try_expect_token!(self, Extern).is_some() {
-                        let f = self.take_extern_fn(Visibility::Public)?;
+            let x = || {
+                let token = token.map_err(|e| vec![e.into()])?;
+                match token.value {
+                    TokenValue::PathSep
+                    | TokenValue::Ident(_)
+                    | TokenValue::LParen
+                    | TokenValue::RParen
+                    | TokenValue::LCurly
+                    | TokenValue::RCurly
+                    | TokenValue::Semicolon
+                    | TokenValue::StrLit(_)
+                    | TokenValue::CStrLit(_)
+                    | TokenValue::NumLit(_)
+                    | TokenValue::BoolLit(_)
+                    | TokenValue::Plus
+                    | TokenValue::Minus
+                    | TokenValue::Asterisk
+                    | TokenValue::Slash
+                    | TokenValue::Not
+                    | TokenValue::Neq
+                    | TokenValue::Lt
+                    | TokenValue::Lte
+                    | TokenValue::Gt
+                    | TokenValue::Gte
+                    | TokenValue::Percent
+                    | TokenValue::Equal
+                    | TokenValue::Swap
+                    | TokenValue::Drop
+                    | TokenValue::Load
+                    | TokenValue::Store
+                    | TokenValue::Break
+                    | TokenValue::Dup
+                    | TokenValue::Ellipsis
+                    | TokenValue::Arrow
+                    | TokenValue::Then
+                    | TokenValue::Else
+                    | TokenValue::While
+                    | TokenValue::Cast
+                    | TokenValue::Void => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::Extern => {
+                        let f = self.take_extern_fn(Visibility::Private, token.span())?;
                         out.push(Ast::ExternFn(f));
-                        break 'a;
                     }
-
-                    if try_expect_token!(self, Fn).is_some() {
-                        let f = self.take_fn(Visibility::Public)?;
+                    TokenValue::Fn => {
+                        let f = self.take_fn(Visibility::Private, token.span())?;
                         out.push(Ast::Fn(f));
-                        break 'a;
                     }
+                    TokenValue::Pub => 'a: {
+                        if let Some(extern_tok) = try_expect_token!(self, Extern) {
+                            let f = self.take_extern_fn(
+                                Visibility::Public,
+                                token.span() + extern_tok.span(),
+                            )?;
+                            out.push(Ast::ExternFn(f));
+                            break 'a;
+                        }
 
-                    if try_expect_token!(self, Use).is_some() {
-                        todo!("pub use")
+                        if let Some(fn_tok) = try_expect_token!(self, Fn) {
+                            let f =
+                                self.take_fn(Visibility::Public, token.span() + fn_tok.span())?;
+                            out.push(Ast::Fn(f));
+                            break 'a;
+                        }
+
+                        if try_expect_token!(self, Use).is_some() {
+                            todo!("pub use")
+                        }
+
+                        if try_expect_token!(self, Mod).is_some() {
+                            let (ident, name) = expect_token!(self, Ident(_));
+                            out.push(Ast::ModuleDeclaration(ModuleDeclaration {
+                                name,
+                                visibility: Visibility::Public,
+                                span: token.span() + ident.span(),
+                                name_span: ident.span(),
+                            }));
+                            break 'a;
+                        }
+
+                        Err(vec![ParseError::unexpected_token(
+                            token,
+                            &[
+                                TokenKind::Fn,
+                                TokenKind::Use,
+                                TokenKind::Mod,
+                                TokenKind::Extern,
+                            ],
+                        )])?
                     }
-
-                    if try_expect_token!(self, Mod).is_some() {
+                    TokenValue::Mod => {
                         let (ident, name) = expect_token!(self, Ident(_));
                         out.push(Ast::ModuleDeclaration(ModuleDeclaration {
                             name,
-                            visibility: Visibility::Public,
+                            visibility: Visibility::Private,
                             span: token.span() + ident.span(),
                             name_span: ident.span(),
                         }));
-                        break 'a;
                     }
-
-                    Err(ParseError::unexpected_token(
-                        token,
-                        &[
-                            TokenKind::Fn,
-                            TokenKind::Use,
-                            TokenKind::Mod,
-                            TokenKind::Extern,
-                        ],
-                    ))?
+                    TokenValue::Use => {
+                        let is_root = try_expect_token!(self, PathSep).is_some();
+                        let tree = self.take_import_tree()?;
+                        out.push(Ast::Import(Import {
+                            span: token.span() + tree.span(),
+                            visibility: Visibility::Private,
+                            tree,
+                            is_root,
+                        }));
+                    }
+                    TokenValue::As => Err(vec![ParseError::unexpected_token(token, &[])])?,
                 }
-                TokenValue::Mod => {
-                    let (ident, name) = expect_token!(self, Ident(_));
-                    out.push(Ast::ModuleDeclaration(ModuleDeclaration {
-                        name,
-                        visibility: Visibility::Private,
-                        span: token.span() + ident.span(),
-                        name_span: ident.span(),
-                    }));
-                }
-                TokenValue::Use => {
-                    let is_root = try_expect_token!(self, PathSep).is_some();
-                    let tree = self.take_import_tree()?;
-                    out.push(Ast::Import(Import {
-                        span: token.span() + tree.span(),
-                        visibility: Visibility::Private,
-                        tree,
-                        is_root,
-                    }));
-                }
-                TokenValue::As => Err(ParseError::unexpected_token(token, &[]))?,
+                Result::<_, Vec<ParseError>>::Ok(())
+            };
+            match x() {
+                Ok(_) => (),
+                Err(e) => errors.extend(e),
             }
         }
 
-        Ok(out)
+        if errors.is_empty() {
+            Ok(out)
+        } else {
+            Err(errors)
+        }
     }
 }

@@ -353,10 +353,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        let end = self.content[self.offset..]
-            .find(|x: char| !x.is_whitespace())
-            .unwrap_or(self.content.len());
-        self.offset += end;
+        if self.offset < self.content.len() {
+            let end = self.content[self.offset..]
+                .find(|x: char| !x.is_whitespace())
+                .unwrap_or(self.content.len());
+            self.offset += end;
+        }
     }
 
     fn take_number(&mut self) -> Result<NumLit, LexError> {

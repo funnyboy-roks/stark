@@ -5,11 +5,12 @@ use std::{
     io::{BufReader, Cursor},
     path::Path,
     rc::Rc,
+    sync::Arc,
 };
 
 use clap::Parser;
 use lex::Lexer;
-use miette::{highlighters::SyntectHighlighter, NamedSource};
+use miette::{NamedSource, highlighters::SyntectHighlighter};
 use syntect::highlighting::ThemeSet;
 
 use crate::{cli::Cli, ir::Module};
@@ -45,55 +46,65 @@ fn main() -> Result<(), miette::Error> {
     }))
     .unwrap();
 
-    fn wrap_miette<T>(
-        r: Result<T, miette::Error>,
-        cli: &Cli,
-        content: impl Into<String>,
-    ) -> Result<T, miette::Report> {
-        r.map_err(|e| {
-            e.with_source_code(
-                NamedSource::new(cli.file.to_string_lossy(), content.into()).with_language("Rust"),
-            )
-        })
+    fn handle_errors<T>(r: Result<T, Vec<miette::Error>>, cli: &Cli, content: impl Into<String>) {
+        if let Err(e) = r {
+            let content = Arc::new(content.into());
+            for e in e {
+                let src = NamedSource::new(cli.file.to_string_lossy(), Arc::clone(&content))
+                    .with_language("Rust");
+                let e = e.with_source_code(src);
+                eprintln!("{:?}", e);
+            }
+        }
     }
 
-    wrap_miette(main2(&cli, content.clone()), &cli, content)?;
+    handle_errors(main2(&cli, content.clone()), &cli, content);
 
     Ok(())
 }
 
-fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
+fn main2(cli: &Cli, content: String) -> Result<(), Vec<miette::Error>> {
     let lex = Lexer::new(&content, cli.file.to_str().unwrap());
     if cli.subcmd.lex {
         for tok in lex {
-            let tok = tok?;
+            let tok = tok.map_err(miette::Error::from).map_err(|x| vec![x])?;
             println!("{:?}", tok);
         }
     } else if cli.subcmd.parse {
         eprintln!("parsing...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse_module()?;
+        let ast = parser
+            .parse_module()
+            .map_err(|e| e.into_iter().map(miette::Error::from).collect::<Vec<_>>())?;
         dbg!(ast);
     } else if cli.subcmd.ir {
         eprintln!("generating ir...");
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse_module()?;
+        let ast = parser
+            .parse_module()
+            .map_err(|e| e.into_iter().map(miette::Error::from).collect::<Vec<_>>())?;
         let mut module = Module::new(
             ast,
-            vec![cli
-                .file
-                .with_extension("")
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string()],
+            vec![
+                cli.file
+                    .with_extension("")
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            ],
             cli.file.clone(),
             content,
             false,
         );
-        module.scan_functions()?;
+        module
+            .scan_functions()
+            .map_err(|e| e.into_iter().map(miette::Error::from).collect::<Vec<_>>())?;
         module.update_roots(Rc::new(module.light_clone()));
-        module.compile_module()?;
+        module
+            .compile_module()
+            .map_err(miette::Error::from)
+            .map_err(|x| vec![x])?;
         fn print_module(module: &Module, indent: usize) {
             eprintln!("{1:>0$}Imports:", indent * 4, "");
             for (from, to) in &module.imports {
@@ -120,23 +131,31 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
         print_module(&module, 1);
     } else {
         let parser = parse::Parser::new(lex);
-        let ast = parser.parse_module()?;
+        let ast = parser
+            .parse_module()
+            .map_err(|e| e.into_iter().map(miette::Error::from).collect::<Vec<_>>())?;
         let mut module = Module::new(
             ast,
-            vec![cli
-                .file
-                .with_extension("")
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string()],
+            vec![
+                cli.file
+                    .with_extension("")
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            ],
             cli.file.clone(),
             content,
             true,
         );
-        module.scan_functions()?;
+        module
+            .scan_functions()
+            .map_err(|e| e.into_iter().map(miette::Error::from).collect::<Vec<_>>())?;
         module.update_roots(Rc::new(module.light_clone()));
-        module.compile_module()?;
+        module
+            .compile_module()
+            .map_err(miette::Error::from)
+            .map_err(|x| vec![x])?;
 
         let out_path = cli
             .asm_out
@@ -148,7 +167,10 @@ fn main2(cli: &Cli, content: String) -> Result<(), miette::Error> {
 
         eprintln!("generating code...");
         let mut codegen = codegen::CodeGen::new(module, &mut out);
-        codegen.compile()?;
+        codegen
+            .compile()
+            .map_err(miette::Error::from)
+            .map_err(|x| vec![x])?;
     }
     Ok(())
 }
