@@ -125,18 +125,6 @@ pub enum IrGenError {
     },
 }
 
-fn wrap_miette<T>(
-    r: Result<T, impl Into<miette::Error>>,
-    path: &std::path::Path,
-    content: impl Into<String>,
-) -> Result<T, miette::Report> {
-    r.map_err(|e| {
-        e.into().with_source_code(
-            NamedSource::new(path.to_string_lossy(), content.into()).with_language("Rust"),
-        )
-    })
-}
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Type {
     I8,
@@ -1780,22 +1768,33 @@ impl Module {
         }
     }
 
-    pub fn check_imports(&self) -> Result<(), IrGenError> {
+    pub fn check_imports(&self, errors: &mut Vec<IrGenError>) -> Result<(), ()> {
+        let mut failed = false;
         for (_, path) in self.imports.iter() {
-            self.resolve_ident(path)?;
+            if let Err(e) = self.resolve_ident(path) {
+                errors.push(e);
+                failed = true;
+            }
         }
-        Ok(())
+        if failed { Err(()) } else { Ok(()) }
     }
 
-    pub fn compile_module(&mut self) -> Result<(), IrGenError> {
-        self.check_imports()?;
+    pub fn compile_module(&mut self, errors: &mut Vec<IrGenError>) -> Result<(), ()> {
+        self.check_imports(errors)?;
+        let mut failed = false;
         for ast in std::mem::take(&mut self.asts) {
-            self.module_ast(ast)?;
+            if self.module_ast(ast, errors).is_err() {
+                failed = true;
+            }
         }
-        Ok(())
+        if failed { Err(()) } else { Ok(()) }
     }
 
-    pub fn parse_module(&self, module: &ModuleDeclaration) -> Result<Module, IrGenError> {
+    pub fn parse_module(
+        &self,
+        module: &ModuleDeclaration,
+        errors: &mut Vec<IrGenError>,
+    ) -> Result<Module, ()> {
         // TODO: handle cyclic dependency
         let paths = [
             // foo.st
@@ -1805,34 +1804,54 @@ impl Module {
             // foo/mod.st
             self.filepath.with_file_name(&module.name).join("mod.st"),
         ];
-        let path =
-            paths
-                .iter()
-                .find(|p| p.exists())
-                .ok_or_else(|| IrGenError::MissingModuleFile {
-                    name: module.name.clone(),
-                    span: module.name_span,
-                    checked_paths: paths.to_vec(),
-                })?;
+        let Some(path) = paths.iter().find(|p| p.exists()) else {
+            errors.push(IrGenError::MissingModuleFile {
+                name: module.name.clone(),
+                span: module.name_span,
+                checked_paths: paths.to_vec(),
+            });
+            return Err(());
+        };
 
-        let content = std::fs::read_to_string(path).map_err(|e| IrGenError::ModuleReadError {
-            source: e,
-            span: module.span(),
-            path: path.clone(),
-        })?;
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                errors.push(IrGenError::ModuleReadError {
+                    source: e,
+                    span: module.span(),
+                    path: path.clone(),
+                });
+                return Err(());
+            }
+        };
         let lex = Lexer::new(&content, path.to_str().unwrap());
         let parser = Parser::new(lex);
-        let ast = wrap_miette(parser.parse_module(), path, &content)
-            .map_err(IrGenError::ModuleParseError)?;
+        let ast = match parser.parse_module() {
+            Ok(ast) => ast,
+            Err(e) => {
+                errors.reserve(e.len());
+                e.into_iter()
+                    .map(|e| {
+                        IrGenError::ModuleParseError(
+                            miette::Error::from(e).with_source_code(
+                                NamedSource::new(path.to_string_lossy(), content.clone())
+                                    .with_language("Rust"),
+                            ),
+                        )
+                    })
+                    .for_each(|e| errors.push(e));
+                return Err(());
+            }
+        };
         let mut new_path = self.path.clone();
         new_path.push(module.name.clone());
         let mut module = Module::new(ast, new_path, path.clone(), content, self.quiet);
-        wrap_miette(module.scan_functions(), path, &module.content)
-            .map_err(IrGenError::ModuleIrGenError)?;
+        module.scan_functions(errors)?;
         Ok(module)
     }
 
-    pub fn scan_functions(&mut self) -> Result<(), IrGenError> {
+    pub fn scan_functions(&mut self, errors: &mut Vec<IrGenError>) -> Result<(), ()> {
+        let mut failed = false;
         for ast in &self.asts {
             match ast {
                 Ast::Ident(_)
@@ -1840,14 +1859,16 @@ impl Module {
                 | Ast::Then(_)
                 | Ast::While(_)
                 | Ast::Cast(_)
-                | Ast::Dup(_) => continue,
+                | Ast::Dup(_) => return Ok(()),
                 Ast::ExternFn(f) => {
                     if let Some(original) = self.functions.get(&f.name) {
-                        return Err(IrGenError::RepeatDefinition {
+                        failed = true;
+                        errors.push(IrGenError::RepeatDefinition {
                             ident: f.name.clone(),
                             original: original.ident_span,
                             repeat: f.ident_span,
                         });
+                        continue;
                     }
                     self.functions.insert(
                         f.name.clone(),
@@ -1877,11 +1898,13 @@ impl Module {
                 }
                 Ast::Fn(f) => {
                     if let Some(original) = self.functions.get(&f.name) {
-                        return Err(IrGenError::RepeatDefinition {
+                        failed = true;
+                        errors.push(IrGenError::RepeatDefinition {
                             ident: f.name.clone(),
                             original: original.ident_span,
                             repeat: f.ident_span,
                         });
+                        continue;
                     }
                     self.functions.insert(
                         f.name.clone(),
@@ -1911,7 +1934,7 @@ impl Module {
                 }
                 Ast::ModuleDeclaration(module) => {
                     // TODO: better file resolution
-                    let parsed = self.parse_module(module)?;
+                    let parsed = self.parse_module(module, errors)?;
                     self.submodules
                         .insert(module.name.clone(), (parsed, module.visibility));
                 }
@@ -1923,7 +1946,7 @@ impl Module {
                 }
             }
         }
-        Ok(())
+        if failed { Err(()) } else { Ok(()) }
     }
 
     pub fn update_roots(&mut self, root: Rc<Module>) {
@@ -2012,7 +2035,7 @@ impl Module {
                     ResolvedIdent::Module(_) => {
                         return Err(IrGenError::UnexpectedModule {
                             span: ident.path.span(),
-                        })
+                        });
                     }
                 }
                 out.push(Ir::new(ident.span(), IrKind::CallFn(ident)));
@@ -2224,7 +2247,7 @@ impl Module {
         Ok(())
     }
 
-    fn module_ast(&mut self, ast: Ast) -> Result<(), IrGenError> {
+    fn module_ast(&mut self, ast: Ast, errors: &mut Vec<IrGenError>) -> Result<(), ()> {
         match ast {
             Ast::Ident(_) => todo!("unexpected ident"),
             Ast::Atom(_) => todo!("unexpected atom"),
@@ -2234,10 +2257,18 @@ impl Module {
                 let mut ir = Vec::with_capacity(f.body.len());
 
                 let mut body_type_stack = signature.args.clone();
-                self.compile_body(&mut body_type_stack, &mut ir, None, f.body)?;
+                if let Err(e) = self.compile_body(&mut body_type_stack, &mut ir, None, f.body) {
+                    errors.push(e);
+                }
 
                 let mut optimised_type_stack = signature.args.clone();
-                let ir = self.optimise(ir, &mut optimised_type_stack)?;
+                let ir = match self.optimise(ir, &mut optimised_type_stack) {
+                    Ok(ir) => ir,
+                    Err(e) => {
+                        errors.push(e);
+                        Vec::new()
+                    }
+                };
                 assert!(optimised_type_stack.matches(&body_type_stack));
 
                 let converted = ConvertedFunction {
@@ -2247,11 +2278,12 @@ impl Module {
                 };
                 self.converted_functions.push(converted);
                 if !body_type_stack.matches(&signature.returns) {
-                    return Err(IrGenError::IncorrectStackResults {
+                    errors.push(IrGenError::IncorrectStackResults {
                         expected: signature.returns,
                         actual: body_type_stack,
                         span: f.ident_span,
                     });
+                    return Err(());
                 }
             }
             Ast::ModuleDeclaration(module) => {
@@ -2259,8 +2291,7 @@ impl Module {
                     .submodules
                     .get_mut(&module.name)
                     .expect("we've added all modules");
-                wrap_miette(module.compile_module(), &module.filepath, &module.content)
-                    .map_err(IrGenError::ModuleIrGenError)?;
+                module.compile_module(errors)?;
             }
             Ast::Import(_) => {}
             Ast::Then(_) => todo!(),
@@ -2316,7 +2347,7 @@ pub fn update_stacks(
                 ResolvedIdent::Module(_) => {
                     return Err(IrGenError::UnexpectedModule {
                         span: ident.path.span(),
-                    })
+                    });
                 }
             }
             // TODO const fn

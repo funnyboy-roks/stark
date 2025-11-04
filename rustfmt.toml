@@ -1,0 +1,3 @@
+# This is so stupid...
+#   https://github.com/rust-lang/rust.vim/blob/master/autoload/rustfmt.vim#L75
+edition = "2024"

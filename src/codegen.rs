@@ -772,7 +772,9 @@ pub enum CodeGenError {
     #[diagnostic(help("Create a function with a valid main signature."))]
     MissingMain,
     #[error("Invalid main function definition")]
-    #[diagnostic(help("Use one of the following valid main signatures:\n    fn main;\n    fn main(u32 **i8);\n    fn main -> (i32);\n    fn main(u32 **i8) -> (i32);"))]
+    #[diagnostic(help(
+        "Use one of the following valid main signatures:\n    fn main;\n    fn main(u32 **i8);\n    fn main -> (i32);\n    fn main(u32 **i8) -> (i32);"
+    ))]
     InvalidMain {
         #[label = "this function"]
         span: Span,

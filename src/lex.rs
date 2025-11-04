@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     ffi::CString,
+    fmt::Display,
     num::{ParseFloatError, ParseIntError},
 };
 
@@ -135,6 +136,56 @@ pub enum TokenKind {
     Else,
     While,
     Break,
+}
+
+impl Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            TokenKind::Ident => "<identifier>",
+            TokenKind::LParen => "'('",
+            TokenKind::RParen => "')'",
+            TokenKind::LCurly => "'{'",
+            TokenKind::RCurly => "'}'",
+            TokenKind::Semicolon => "';'",
+            TokenKind::StrLit => "<string>",
+            TokenKind::CStrLit => "<c-string>",
+            TokenKind::NumLit => "<number>",
+            TokenKind::BoolLit => "<bool>",
+            TokenKind::Plus => "'+'",
+            TokenKind::Minus => "'-'",
+            TokenKind::Asterisk => "'*'",
+            TokenKind::Slash => "'.'",
+            TokenKind::Equal => "'='",
+            TokenKind::Not => "'!'",
+            TokenKind::Neq => "'!='",
+            TokenKind::Lt => "'<'",
+            TokenKind::Lte => "'<='",
+            TokenKind::Gt => "'>'",
+            TokenKind::Gte => "'>='",
+            TokenKind::Percent => "'%'",
+            TokenKind::Ellipsis => "'...'",
+            TokenKind::Arrow => "'->'",
+            TokenKind::PathSep => "'::'",
+            TokenKind::Dup => "'dup'",
+            TokenKind::Swap => "'swap'",
+            TokenKind::Drop => "'drop'",
+            TokenKind::Cast => "'cast'",
+            TokenKind::Load => "'load'",
+            TokenKind::Store => "'store'",
+            TokenKind::Extern => "'extern'",
+            TokenKind::Fn => "'fn'",
+            TokenKind::Void => "'void'",
+            TokenKind::Pub => "'pub'",
+            TokenKind::Mod => "'mod'",
+            TokenKind::Use => "'use'",
+            TokenKind::As => "'as'",
+            TokenKind::Then => "'then'",
+            TokenKind::Else => "'else'",
+            TokenKind::While => "'while'",
+            TokenKind::Break => "'break'",
+        };
+        f.write_str(s)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -338,7 +389,7 @@ impl Token {
 
 #[derive(Default, Clone)]
 pub struct Lexer<'a> {
-    content: &'a str,
+    pub content: &'a str,
     file: &'a str,
     offset: usize,
 }
@@ -353,10 +404,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        let end = self.content[self.offset..]
-            .find(|x: char| !x.is_whitespace())
-            .unwrap_or(self.content.len());
-        self.offset += end;
+        if self.offset < self.content.len() {
+            let end = self.content[self.offset..]
+                .find(|x: char| !x.is_whitespace())
+                .unwrap_or(self.content.len());
+            self.offset += end;
+        }
     }
 
     fn take_number(&mut self) -> Result<NumLit, LexError> {

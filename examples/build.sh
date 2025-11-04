@@ -2,21 +2,29 @@
 
 set -xe
 
-build() {
-    exe=${1%.st}
-    asm="$exe.s"
-    obj="$exe.o"
-    echo "Compiling '$exe'"
-
-    cargo r -- -o "$asm" "$1"
-    fasm "$asm" "$obj"
-    gcc -no-pie -o "$exe" "$obj"
-}
+TARGETS="
+collatz
+conditional
+fib
+fizzbuzz
+functions
+loops
+pointers
+test
+cat/cat
+ffi/hello
+raylib/japan
+"
 
 if [ -n "$1" ]; then
-    build "$1"
+    make "$1"
 else
-    for file in $(find -maxdepth 1 -iname "*.st"); do
-        build $file
+    init_dir=$(pwd)
+    for target in $TARGETS; do
+        if [ -n $(dirname $target) ]; then
+            cd $(dirname $target)
+        fi
+        make -B $(basename $target)
+        cd $init_dir
     done
 fi

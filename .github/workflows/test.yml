@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 name: test
 jobs:
-  fmt:
+  test:
     runs-on: ubuntu-latest
     name: test
     steps:
@@ -19,6 +19,21 @@ jobs:
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: Install fasm
-        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1'
+        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1 && echo $PWD >> $GITHUB_PATH'
       - name: Run Tests
-        run: 'cd tests && PATH=..:$PATH ./test.sh'
+        run: 'cd tests && ./test.sh'
+  examples:
+    runs-on: ubuntu-latest
+    name: examples
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install fasm
+        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1 && echo $PWD >> $GITHUB_PATH'
+      - name: Echo path
+        run: 'echo $PATH'
+      - name: Compile Examples
+        run: 'cd examples && ./build.sh'
