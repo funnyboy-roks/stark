@@ -13,8 +13,8 @@ pointers
 test
 cat/cat
 ffi/hello
+raylib/japan
 "
-# NOTE: skipping raylib/japan since ci doesn't have the library.
 
 if [ -n "$1" ]; then
     make "$1"
