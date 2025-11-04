@@ -33,5 +33,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install fasm
         run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1'
+      - name: Echo path
+        run: 'echo $PATH'
       - name: Compile Examples
         run: 'cd examples && PATH=..:$PATH ./build.sh'
