@@ -7,11 +7,12 @@ use std::{
     rc::Rc,
 };
 
+use fuzzt::{algorithms::NormalizedLevenshtein, processors::LowerAlphaNumStringProcessor};
 use miette::{Diagnostic, NamedSource};
 use thiserror::Error;
 
 use crate::{
-    lex::{Lexer, NumLitVal},
+    lex::{self, Lexer, NumLitVal},
     parse::{
         Ast, AtomKind, Ident, ImportTree, ImportTreeValue, ModuleDeclaration, Parser, Path,
         PathElement, TypeAtom, Visibility,
@@ -65,11 +66,33 @@ pub enum IrGenError {
         #[label = "here"]
         span: Span,
     },
-    #[error("Undefined symbol '{ident}'")]
+    #[error("Undefined symbol '{ident}'.")]
     UndefinedSymbol {
         ident: String,
         #[label = "here"]
         span: Span,
+    },
+    #[error(
+        "Undefined symbol '{ident}'.  A keyword with a similar name exists: '{}'.",
+        alternative
+    )]
+    UndefinedSymbolAltKw {
+        ident: String,
+        #[label = "here"]
+        span: Span,
+        alternative: String,
+    },
+    #[error(
+        "Undefined symbol '{ident}'.  A function with a similar name exists: '{}'.",
+        alternative
+    )]
+    UndefinedSymbolAltFn {
+        ident: String,
+        #[label = "here"]
+        span: Span,
+        alternative: String,
+        #[label = "similar function defined here"]
+        alternative_span: Span,
     },
     #[error("Unexpected module reference.  Expected a function reference.")]
     UnexpectedModule {
@@ -1692,6 +1715,15 @@ impl Module {
         }
     }
 
+    pub fn identifiers(&self) -> Vec<&str> {
+        self.imports
+            .keys()
+            .chain(self.functions.keys())
+            .map(|x| &**x)
+            .chain(lex::KW_MAP.keys().copied())
+            .collect()
+    }
+
     fn resolve_ident_rec(
         &self,
         path: &[PathElement],
@@ -1712,6 +1744,35 @@ impl Module {
                         });
                     }
                     ResolvedIdent::Module(m)
+                } else if let Some(alt) = fuzzt::get_top_n(
+                    &last.name,
+                    &self.identifiers(),
+                    Some(0.5),
+                    Some(1),
+                    Some(&LowerAlphaNumStringProcessor),
+                    Some(&NormalizedLevenshtein),
+                )
+                .first()
+                {
+                    if let Some(f) = self.resolve_path(&[alt.to_string()]) {
+                        return Err(IrGenError::UndefinedSymbolAltFn {
+                            ident: last.name.clone(),
+                            span: last.span(),
+                            alternative: alt.to_string(),
+                            alternative_span: f.0.ident_span,
+                        });
+                    } else if lex::KW_MAP.contains_key(alt) {
+                        return Err(IrGenError::UndefinedSymbolAltKw {
+                            ident: last.name.clone(),
+                            span: last.span(),
+                            alternative: alt.to_string(),
+                        });
+                    } else {
+                        return Err(IrGenError::UndefinedSymbol {
+                            ident: last.name.clone(),
+                            span: last.span(),
+                        });
+                    }
                 } else {
                     return Err(IrGenError::UndefinedSymbol {
                         ident: last.name.clone(),

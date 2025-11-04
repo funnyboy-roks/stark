@@ -9,3 +9,4 @@ miette = { version = "7.5.0", features = ["fancy", "syntect-highlighter"] }
 syntect = "5.2.0"
 phf = { version = "0.11.3", features = ["macros"] }
 thiserror = "2.0.12"
+fuzzt = { version = "0.3.1", default-features = false, features = ["levenshtein"] }

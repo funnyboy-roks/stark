@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::span::{Span, Spanned};
 
-const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
+pub const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "dup" => TokenValue::Dup,
     "swap" => TokenValue::Swap,
     "drop" => TokenValue::Drop,
