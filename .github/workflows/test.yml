@@ -19,7 +19,7 @@ jobs:
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: Install fasm
-        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1 && mv fasm /bin'
+        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1 && echo $PWD >> $GITHUB_PATH'
       - name: Run Tests
         run: 'cd tests && ./test.sh'
   examples:
@@ -32,7 +32,7 @@ jobs:
       - name: Install stable
         uses: dtolnay/rust-toolchain@stable
       - name: Install fasm
-        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1 && mv fasm /bin'
+        run: 'wget -O - https://flatassembler.net/fasm-1.73.32.tgz | tar -xzf - fasm/fasm --strip-components=1 && echo $PWD >> $GITHUB_PATH'
       - name: Echo path
         run: 'echo $PATH'
       - name: Compile Examples
