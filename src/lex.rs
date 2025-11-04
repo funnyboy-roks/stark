@@ -59,18 +59,11 @@ pub struct NumLit {
     pub radix: Radix,
 }
 
-macro_rules! define_tokens_inner {
-    (@_ $ty: ty) => {
-        _
-    };
-}
-
 macro_rules! define_tokens {
-    ($( $(#[$($attr: tt)*])* $ident: ident$(($ty: ty))? = $display: literal ),+$(,)?) => {
+    ($( $ident: ident$(($ty: ty))? = $display: literal ),+$(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum TokenKind {
             $(
-                $(#[$($attr)*])*
                 $ident
             ),+
         }
@@ -78,7 +71,6 @@ macro_rules! define_tokens {
         #[derive(Debug, Clone, PartialEq)]
         pub enum TokenValue {
             $(
-                $(#[$($attr)*])*
                 $ident$(($ty))?
             ),+
         }
@@ -98,22 +90,25 @@ macro_rules! define_tokens {
             pub const fn kind(&self) -> TokenKind {
                 match self {
                     $(
-                        Self::$ident$((define_tokens_inner!(@_ $ty)))? => TokenKind::$ident
+                        Self::$ident$((define_tokens!(@_ $ty)))? => TokenKind::$ident
                     ),+
                 }
             }
         }
+    };
 
+    (@_ $ty: ty) => {
+        _
     };
 }
 
 define_tokens! {
     Ident(String) = "<identifier>",
-    LParen = "(",
-    RParen = ")",
-    LCurly = "{",
-    RCurly = "}",
-    Semicolon = ";",
+    LParen = "'('",
+    RParen = "')'",
+    LCurly = "'{'",
+    RCurly = "'}'",
+    Semicolon = "';'",
 
     // Lits
     StrLit(String) = "<string>",
@@ -122,9 +117,9 @@ define_tokens! {
     BoolLit(bool) = "<boolean>",
 
     // Ops
-    Plus = "+",
-    Minus = "-",
-    Asterisk = "*",
+    Plus = "'+'",
+    Minus = "'-'",
+    Asterisk = "'*'",
     Slash = "'/'",
     Equal = "'='",
     Not = "'!'",
@@ -142,11 +137,8 @@ define_tokens! {
     Shr = "'>>'",
 
     // Symbols
-    /// `...`
     Ellipsis = "'...'",
-    /// `->`
     Arrow = "'->'",
-    /// `::`
     PathSep = "'::'",
 
     // Builtins
@@ -543,8 +535,8 @@ impl Iterator for Lexer<'_> {
             let c2 = chars.next();
             let start = self.offset;
             macro_rules! token {
-                ($offset: expr, $token: ident) => {{
-                    self.offset += $offset;
+                ($length: expr, $token: ident) => {{
+                    self.offset += $length;
                     return Some(Ok(Token::new(
                         start..self.offset,
                         self.file,

@@ -110,97 +110,72 @@ pub enum TypeAtom {
     Pointer(Box<TypeAtom>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum AtomKind {
-    NumLit(NumLit),
-    StrLit(String),
-    CStrLit(CString),
-    BoolLit(bool),
+macro_rules! define_atom_kind {
+    ($( $($t: literal =>)? $ident: ident$(($ty: ty))? ),+$(,)?) => {
+        #[derive(Debug, Clone, PartialEq)]
+        pub enum AtomKind {
+            $(
+                $ident$(($ty))?
+            ),+
+        }
+
+        impl TryFrom<TokenValue> for AtomKind {
+            type Error = ();
+
+            fn try_from(value: TokenValue) -> Result<Self, Self::Error> {
+                $(
+                    define_atom_kind!(@ value $($t =>)? $ident$(($ty))?);
+                )+
+                Err(())
+            }
+        }
+    };
+    (@ $value: ident $t: literal => $ident: ident$(($ty: ty))?) => {
+        if let TokenValue::$ident$((define_atom_kind!(@_ $ty, x)))? = $value {
+            return Ok(Self::$ident$((define_atom_kind!(@_ $ty, x)))?);
+        }
+    };
+    (@_ $ty: ty, $ident: ident) => {
+        $ident
+    };
+    (@ $value: ident $ident: ident$(($ty: ty))?) => {
+    };
+}
+
+// `0 =>` indicates that this kind is derived directly from a token
+define_atom_kind! {
+    0 => NumLit(NumLit),
+    0 => StrLit(String),
+    0 => CStrLit(CString),
+    0 => BoolLit(bool),
     Type(TypeAtom),
 
     // Ops
-    Plus,
-    Minus,
-    Asterisk,
-    Slash,
-    Equal,
-    Not,
-    Neq,
-    Lt,
-    Lte,
-    Gt,
-    Gte,
-    Percent,
-    Ampersand,
-    Pipe,
-    Caret,
-    Tilde,
-    Shl,
-    Shr,
+    0 => Plus,
+    0 => Minus,
+    0 => Asterisk,
+    0 => Slash,
+    0 => Equal,
+    0 => Not,
+    0 => Neq,
+    0 => Lt,
+    0 => Lte,
+    0 => Gt,
+    0 => Gte,
+    0 => Percent,
+    0 => Ampersand,
+    0 => Pipe,
+    0 => Caret,
+    0 => Tilde,
+    0 => Shl,
+    0 => Shr,
 
     // Keywords
-    Swap,
-    Drop,
-    Break,
-    Load,
-    Store,
-}
-
-impl TryFrom<TokenValue> for AtomKind {
-    type Error = ();
-
-    fn try_from(value: TokenValue) -> Result<Self, Self::Error> {
-        match value {
-            TokenValue::Ident(_) => Err(()),
-            TokenValue::LParen => Err(()),
-            TokenValue::RParen => Err(()),
-            TokenValue::LCurly => Err(()),
-            TokenValue::RCurly => Err(()),
-            TokenValue::Semicolon => Err(()),
-            TokenValue::StrLit(s) => Ok(Self::StrLit(s)),
-            TokenValue::CStrLit(s) => Ok(Self::CStrLit(s)),
-            TokenValue::NumLit(n) => Ok(Self::NumLit(n)),
-            TokenValue::BoolLit(n) => Ok(Self::BoolLit(n)),
-            TokenValue::Plus => Ok(Self::Plus),
-            TokenValue::Minus => Ok(Self::Minus),
-            TokenValue::Asterisk => Ok(Self::Asterisk),
-            TokenValue::Slash => Ok(Self::Slash),
-            TokenValue::Equal => Ok(Self::Equal),
-            TokenValue::Not => Ok(Self::Not),
-            TokenValue::Neq => Ok(Self::Neq),
-            TokenValue::Lt => Ok(Self::Lt),
-            TokenValue::Lte => Ok(Self::Lte),
-            TokenValue::Gt => Ok(Self::Gt),
-            TokenValue::Gte => Ok(Self::Gte),
-            TokenValue::Percent => Ok(Self::Percent),
-            TokenValue::Ampersand => Ok(Self::Ampersand),
-            TokenValue::Pipe => Ok(Self::Pipe),
-            TokenValue::Caret => Ok(Self::Caret),
-            TokenValue::Tilde => Ok(Self::Tilde),
-            TokenValue::Shl => Ok(Self::Shl),
-            TokenValue::Shr => Ok(Self::Shr),
-            TokenValue::Ellipsis => Err(()),
-            TokenValue::Arrow => Err(()),
-            TokenValue::Dup => Err(()),
-            TokenValue::Swap => Ok(Self::Swap),
-            TokenValue::Drop => Ok(Self::Drop),
-            TokenValue::Extern => Err(()),
-            TokenValue::Fn => Err(()),
-            TokenValue::Cast => Err(()),
-            TokenValue::Void => Err(()),
-            TokenValue::Load => Ok(Self::Load),
-            TokenValue::Store => Ok(Self::Store),
-            TokenValue::Then => Err(()),
-            TokenValue::Else => Err(()),
-            TokenValue::While => Err(()),
-            TokenValue::Break => Ok(Self::Break),
-            TokenValue::PathSep => Err(()),
-            TokenValue::Pub => Err(()),
-            TokenValue::Mod => Err(()),
-            TokenValue::Use => Err(()),
-            TokenValue::As => Err(()),
-        }
-    }
+    0 => Swap,
+    0 => Drop,
+    0 => Break,
+    0 => Load,
+    0 => Store,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,11 +191,10 @@ impl Spanned for Atom {
 }
 
 impl TryFrom<Token> for Atom {
-    type Error = ParseError;
+    type Error = ();
 
     fn try_from(token: Token) -> Result<Self, Self::Error> {
-        // TODO: remove this unwrap
-        let kind = token.value.clone().try_into().unwrap();
+        let kind = token.value.clone().try_into()?;
         Ok(Self { token, kind })
     }
 }
@@ -1098,11 +1072,19 @@ impl<'a> Parser<'a> {
                         let ident = self.take_ident(token)?;
                         out.push(Ast::Ident(ident));
                     }
-                    TokenValue::LParen => Err(vec![ParseError::unexpected_token(token, &[])])?,
-                    TokenValue::RParen => Err(vec![ParseError::unexpected_token(token, &[])])?,
-                    TokenValue::LCurly => Err(vec![ParseError::unexpected_token(token, &[])])?,
-                    TokenValue::RCurly => Err(vec![ParseError::unexpected_token(token, &[])])?,
-                    TokenValue::Semicolon => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    TokenValue::LParen
+                    | TokenValue::RParen
+                    | TokenValue::LCurly
+                    | TokenValue::RCurly
+                    | TokenValue::Ellipsis
+                    | TokenValue::Arrow
+                    | TokenValue::Void
+                    | TokenValue::Else
+                    | TokenValue::Semicolon
+                    | TokenValue::Pub
+                    | TokenValue::Mod
+                    | TokenValue::Use
+                    | TokenValue::As => Err(vec![ParseError::unexpected_token(token, &[])])?,
                     TokenValue::StrLit(_)
                     | TokenValue::CStrLit(_)
                     | TokenValue::NumLit(_)
@@ -1129,11 +1111,9 @@ impl<'a> Parser<'a> {
                     | TokenValue::Drop
                     | TokenValue::Load
                     | TokenValue::Store
-                    | TokenValue::Break => {
-                        out.push(Ast::Atom(Atom::try_from(token).map_err(|e| vec![e])?))
-                    }
-                    TokenValue::Ellipsis => Err(vec![ParseError::unexpected_token(token, &[])])?,
-                    TokenValue::Arrow => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    | TokenValue::Break => out.push(Ast::Atom(
+                        Atom::try_from(token).expect("all of these types have try_from"),
+                    )),
                     TokenValue::Extern => {
                         let f = self.take_extern_fn(Visibility::Private, token.span())?;
                         Err(vec![ParseError::NestedFunction { span: f.span() }])?
@@ -1154,19 +1134,13 @@ impl<'a> Parser<'a> {
 
                         out.push(Ast::Dup(Dup { span, count }));
                     }
-                    TokenValue::Void => Err(vec![ParseError::unexpected_token(token, &[])])?,
                     TokenValue::Then => {
                         let t = self.take_then(token)?;
                         out.push(Ast::Then(t));
                     }
-                    TokenValue::Else => Err(vec![ParseError::unexpected_token(token, &[])])?,
                     TokenValue::While => {
                         out.push(Ast::While(self.take_while(token)?));
                     }
-                    TokenValue::Pub => todo!(),
-                    TokenValue::Mod => todo!(),
-                    TokenValue::Use => todo!(),
-                    TokenValue::As => todo!(),
                 }
                 Result::<_, Vec<ParseError>>::Ok(None)
             };
