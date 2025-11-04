@@ -500,6 +500,92 @@ impl Builtin {
                     writeln!(writer, "    push {}", Register::Rdx.for_size(ty.size()))?;
                 }
             }
+            Builtin::And => {
+                let ty = &type_stack[len - 1];
+                assert!(type_stack[len - 1].is_integer());
+                assert!(type_stack[len - 2].is_integer());
+                assert_eq!(type_stack[len - 1].padded_size(), 8);
+                assert_eq!(type_stack[len - 2].padded_size(), 8);
+                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                writeln!(
+                    writer,
+                    "    and qword [rsp], {}",
+                    Register::Rax.for_size(ty.size())
+                )?;
+            }
+            Builtin::Or => {
+                let ty = &type_stack[len - 1];
+                assert!(type_stack[len - 1].is_integer());
+                assert!(type_stack[len - 2].is_integer());
+                assert_eq!(type_stack[len - 1].padded_size(), 8);
+                assert_eq!(type_stack[len - 2].padded_size(), 8);
+                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                writeln!(
+                    writer,
+                    "    or qword [rsp], {}",
+                    Register::Rax.for_size(ty.size())
+                )?;
+            }
+            Builtin::Xor => {
+                let ty = &type_stack[len - 1];
+                assert!(type_stack[len - 1].is_integer());
+                assert!(type_stack[len - 2].is_integer());
+                assert_eq!(type_stack[len - 1].padded_size(), 8);
+                assert_eq!(type_stack[len - 2].padded_size(), 8);
+                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                writeln!(
+                    writer,
+                    "    xor qword [rsp], {}",
+                    Register::Rax.for_size(ty.size())
+                )?;
+            }
+            Builtin::BitNot => {
+                assert!(type_stack[len - 1].is_integer());
+                assert_eq!(type_stack[len - 1].padded_size(), 8);
+                writeln!(
+                    writer,
+                    "    not {} [rsp]",
+                    match type_stack[len - 1].size() {
+                        1 => "byte",
+                        2 => "word",
+                        4 => "dword",
+                        8 => "qword",
+                        _ => unreachable!(),
+                    }
+                )?;
+            }
+            Builtin::Shl => {
+                let ty = &type_stack[len - 1];
+                assert!(type_stack[len - 1].is_integer());
+                assert!(type_stack[len - 2].is_integer());
+                assert_eq!(type_stack[len - 1].padded_size(), 8);
+                assert_eq!(type_stack[len - 2].padded_size(), 8);
+                writeln!(writer, "    popq {}", Register::Rcx.for_size(ty.size()))?;
+                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                writeln!(
+                    writer,
+                    "    shl {}, {}",
+                    Register::Rax.for_size(ty.size()),
+                    Register::Rcx.for_size(1)
+                )?;
+                writeln!(writer, "    pushq {}", Register::Rax.for_size(ty.size()))?;
+            }
+            Builtin::Shr => {
+                let ty = &type_stack[len - 1];
+                assert!(type_stack[len - 1].is_integer());
+                assert!(type_stack[len - 2].is_integer());
+                assert_eq!(type_stack[len - 1].padded_size(), 8);
+                assert_eq!(type_stack[len - 2].padded_size(), 8);
+                writeln!(writer, "    popq {}", Register::Rcx.for_size(ty.size()))?;
+                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
+                writeln!(
+                    writer,
+                    "    shr {}, {}",
+                    Register::Rax.for_size(ty.size()),
+                    Register::Rcx.for_size(1)
+                )?;
+                writeln!(writer, "    pushq {}", Register::Rax.for_size(ty.size()))?;
+            }
             Builtin::Equal => {
                 compare!(a, b);
                 writeln!(writer, "    sete al")?;
