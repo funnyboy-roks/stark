@@ -1284,7 +1284,7 @@ impl<W: Write> CodeGen<W> {
             self.writer,
             "    call ?{}${}",
             module.path.join("$"),
-            resolved_f.linker_name
+            resolved_f.name
         )?;
 
         // Push first argument back onto the stack

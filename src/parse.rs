@@ -704,6 +704,13 @@ impl<'a> Parser<'a> {
         extern_span: Span,
     ) -> Result<ExternFn, Vec<ParseError>> {
         let mut span = extern_span;
+        let linker_symbol = if try_expect_token!(self, LParen).is_some() {
+            let (_, s) = expect_token!(self, StrLit(_));
+            expect_token!(self, RParen);
+            Some(s)
+        } else {
+            None
+        };
         // expect_token!(self, Extern);
         expect_token!(self, Fn);
         let (ident_token, ident) = expect_token!(self, Ident(_));
@@ -764,7 +771,7 @@ impl<'a> Parser<'a> {
             visibility: vis,
             name: ident.to_string(),
             ident_span: ident_token.span(),
-            linker_name: ident,
+            linker_name: linker_symbol.unwrap_or(ident),
             args,
             variadic,
             returns,

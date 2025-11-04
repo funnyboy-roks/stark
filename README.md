@@ -34,21 +34,18 @@ c"\n" printf drop
     - [ ] `switch`? 
 - [ ] Error handling
     - [ ] Report good type errors
-    - [ ] Continue after error and report all at once
+    - [x] Continue after error and report all at once
 - [x] Non-decimal integer literals
 - [x] Full suite of numbers: i8, i16, i32, i64, u8, u16, u32, u64
 - [x] Miette + thiserror for better errors
 - [x] Type system
     - [x] Somehow validate that functions are using the correct args
-- [ ] Functions
+- [x] Functions
     - [x] Extern functions
         - `extern fn strlen(*i8) -> (i64);`
-        - [ ] Ability to change the linker symbol for this function- not
-          sure on the syntax yet:
+        - [x] Ability to change the linker symbol for this function
           ```zig
-          extern fn strlen(*i8) -> (i32) @extern("strlen");
-          extern("strlen") fn strlen(*i8) -> (i32);
-          extern fn strlen(*i8) -> (i32) @ "strlen";
+          extern("strlen") fn string_length(*i8) -> (i32);
           ```
     - [x] User-defined functions
         - `fn double(i64) -> (i64) { dup + }`
@@ -61,17 +58,16 @@ c"\n" printf drop
     - [x] Imports
 - [x] Linking with libc
 - [ ] Better CLI
-- [ ] structs
-- [ ] pointers
+- [ ] structs (#8)
+- [x] pointers
     - [x] Typed pointers
         - [x] Smarter pointer increments (like C)
-    - [ ] Fat pointers for things like strings
 - [x] c-strings (null-terminated strings)
     - `c"hello"` -> `"hello", 0`
 - [ ] Auto drop (and other global directives):
     - `@auto_drop` at top of file or something
 - [ ] Asymmetrical strings: `` `' `` or even `«»` (or both!)
-- [ ] Optional stack assertion line suffix: `5 dup u32 | .. u64 u32`
+- [ ] Optional stack assertion line suffix: `5 dup u32 | .. u64 u32` (#12)
     - Syntax:
       ```bnf
       <statements> ::= ; to be defined
