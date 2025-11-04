@@ -11,6 +11,7 @@ functions
 loops
 pointers
 test
+macros
 cat/cat
 ffi/hello
 raylib/japan

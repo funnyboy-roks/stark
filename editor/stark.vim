@@ -31,6 +31,8 @@ hi def link starkBuiltin      Function
 hi def link starkPathSep      Keyword
 
 hi def link starkFuncName     Function
+hi def link starkMacroName    Debug
+hi def link starkMacroVar     Define
 
 syntax keyword Todo contained TODO FIXME XXX NOTE
 syntax region starkBlockComment start=/\/\*/ end=/\*\// contains=Todo,starkBlockComment
@@ -48,6 +50,7 @@ syntax keyword starkKeyword extern
 syntax keyword starkKeyword fn use nextgroup=starkPath skipwhite skipempty
 syntax keyword starkKeyword swap drop break
 syntax keyword starkKeyword pub mod as
+syntax keyword starkKeyword macro
 
 syntax match starkKeyword /\<cast(.[^)]\+)/ contains=starkType
 syntax match starkKeyword /\<dup\((\d\+)\)\?\%([^[:cntrl:][:space:][:punct:]]\|_\)\@!/ contains=starkDecNumber,starkHexNumber,starkBinNumber
@@ -58,6 +61,8 @@ syntax match starkPath     /\(\(\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\
 " Highlight 'foo::bar' in 'mod foo::bar'
 syntax match starkPath     /\(\(\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*\)\+\(::\)\?\)\+/ contains=starkFuncName,starkPathSep contained
 syntax match starkFuncName /\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*/ display contained
+syntax match starkMacroName /#\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*/ display
+syntax match starkMacroVar /$\%([^[:cntrl:][:space:][:punct:][:digit:]]\|_\)\%([^[:cntrl:][:punct:][:space:]]\|_\)*/ display
 
 syntax keyword starkBoolean true false
 

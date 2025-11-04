@@ -1,11 +1,12 @@
 use std::{
+    collections::{HashMap, VecDeque},
     ffi::CString,
     fmt::{Debug, Display},
-    iter::Peekable,
     ops::{Deref, DerefMut},
 };
 
 use miette::Diagnostic;
+use phf::phf_map;
 use thiserror::Error;
 
 use crate::{
@@ -454,9 +455,40 @@ impl<D: Display> Display for DisplayList<'_, D> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MacroArgKind {
+    Ident,
+    Token,
+    Literal,
+}
+
+const MACRO_ARG_KIND: phf::Map<&str, MacroArgKind> = phf_map! {
+    "ident" => MacroArgKind::Ident,
+    "token" => MacroArgKind::Token,
+    "literal" => MacroArgKind::Literal,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MacroArg {
+    name_span: Span,
+    name: String,
+    kind: MacroArgKind,
+}
+
+#[derive(Clone, Debug)]
+struct Macro {
+    macro_span: Span,
+    ident_span: Span,
+    body_span: Span,
+    tokens: Vec<Token>,
+    args: Option<Vec<MacroArg>>,
+}
+
 pub struct Parser<'a> {
     len: usize,
-    tokens: Peekable<Lexer<'a>>,
+    lexer: Lexer<'a>,
+    queued_tokens: VecDeque<Token>,
+    macros: HashMap<String, Macro>,
 }
 
 #[derive(Debug, Clone, Error, Diagnostic)]
@@ -464,8 +496,14 @@ pub enum ParseError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     LexError(#[from] LexError),
-    #[error("Expected {expected}, found {found}")]
+    #[error("Unexpected token {found}")]
     UnexpectedToken {
+        #[label = "here"]
+        span: Span,
+        found: TokenKind,
+    },
+    #[error("Expected {expected}, found {found}")]
+    UnexpectedTokenExpected {
         #[label = "here"]
         span: Span,
         found: TokenKind,
@@ -498,6 +536,37 @@ pub enum ParseError {
         #[label = "Function definition"]
         span: Span,
     },
+    #[error("Invalid macro argument kind: '{kind}'")]
+    #[diagnostic(help("Use one of: {:?}", MACRO_ARG_KIND.keys().collect::<Vec<_>>()))]
+    InvalidMacroArgKind {
+        #[label = "this argument"]
+        arg: Span,
+        kind: String,
+        #[label = "Invalid macro argument kind"]
+        kind_span: Span,
+    },
+    #[error("Undefined macro: #{name}")]
+    UndefinedMacro {
+        name: String,
+        #[label = "Used here"]
+        span: Span,
+    },
+    #[error("Expected literal, got {}", kind)]
+    ExpectedLiteral {
+        #[label = "this argument"]
+        span: Span,
+        #[label = "in this macro invocation"]
+        makro: Span,
+        kind: TokenKind,
+    },
+    #[error("Undefined macro variable ${}", var)]
+    UndefinedMacroVariable {
+        var: String,
+        #[label = "here"]
+        span: Span,
+        #[label = "in this macro definition"]
+        makro: Span,
+    },
 }
 
 impl ParseError {
@@ -513,25 +582,30 @@ impl ParseError {
         }
     }
     pub fn unexpected_token(token: Token, expected: &'static [TokenKind]) -> Self {
-        Self::UnexpectedToken {
-            span: token.span(),
-            found: token.kind(),
-            expected: DisplayList(expected),
+        if expected.is_empty() {
+            Self::UnexpectedToken {
+                span: token.span(),
+                found: token.kind(),
+            }
+        } else {
+            Self::UnexpectedTokenExpected {
+                span: token.span(),
+                found: token.kind(),
+                expected: DisplayList(expected),
+            }
         }
     }
 }
 
 macro_rules! expect_token {
     ($self: ident, $ident: ident) => {{
-        let Some(token) = $self.tokens.next() else {
+        let Some(token) = $self.take_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 $self.end_span(),
                 &[TokenKind::$ident],
                 None,
             )]);
         };
-
-        let token = token.map_err(|e| vec![e.into()])?;
 
         match token.value {
             TokenValue::$ident => (token, ()),
@@ -544,15 +618,13 @@ macro_rules! expect_token {
         }
     }};
     ($self: ident, $ident: ident(_)) => {{
-        let Some(token) = $self.tokens.next() else {
+        let Some(token) = $self.take_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 $self.end_span(),
                 &[TokenKind::$ident],
                 None,
             )]);
         };
-
-        let token = token.map_err(|e| vec![e.into()])?;
 
         match token.value {
             TokenValue::$ident(ref x) => {
@@ -572,21 +644,16 @@ macro_rules! expect_token {
 macro_rules! try_expect_token {
     ($self: ident, $ident: ident) => {
         'a: {
-            let Some(token) = $self.tokens.peek() else {
+            let Some(token) = $self.peek_token().map_err(|e| vec![e.into()])? else {
                 break 'a None;
             };
 
-            let Ok(token) = token.as_ref() else {
-                break 'a None;
-            };
-
-            match token.value {
-                TokenValue::$ident => {
+            match token.kind() {
+                TokenKind::$ident => {
                     let token = $self
-                        .tokens
-                        .next()
+                        .take_token()
                         .expect("checked above")
-                        .map_err(|e| vec![e.into()])?;
+                        .expect("checked above");
                     Some(token)
                 }
                 _ => None,
@@ -599,8 +666,30 @@ impl<'a> Parser<'a> {
     pub fn new(lexer: Lexer<'a>) -> Self {
         Self {
             len: lexer.content.len(),
-            tokens: lexer.peekable(),
+            lexer,
+            queued_tokens: Default::default(),
+            macros: Default::default(),
         }
+    }
+
+    fn peek_token(&mut self) -> Result<Option<&Token>, LexError> {
+        if self.queued_tokens.is_empty() {
+            let Some(tok) = self.lexer.next().transpose()? else {
+                return Ok(None);
+            };
+            self.queued_tokens.push_back(tok);
+        }
+        Ok(self.queued_tokens.front())
+    }
+
+    fn take_token(&mut self) -> Result<Option<Token>, LexError> {
+        if self.queued_tokens.is_empty() {
+            let Some(tok) = self.lexer.next().transpose()? else {
+                return Ok(None);
+            };
+            self.queued_tokens.push_back(tok);
+        }
+        Ok(self.queued_tokens.pop_front())
     }
 
     fn end_span(&self) -> Span {
@@ -608,7 +697,7 @@ impl<'a> Parser<'a> {
     }
 
     fn take_type(&mut self) -> Result<(TypeAtom, Span), Vec<ParseError>> {
-        let Some(token) = self.tokens.next() else {
+        let Some(token) = self.take_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 self.end_span(),
                 &[TokenKind::Asterisk, TokenKind::Ident],
@@ -616,16 +705,14 @@ impl<'a> Parser<'a> {
             )]);
         };
 
-        let token = token.map_err(|e| vec![e.into()])?;
         let span = token.span();
         match token.value {
             TokenValue::Asterisk => {
-                if let Some(Ok(t)) = self.tokens.peek()
+                if let Ok(Some(t)) = self.peek_token()
                     && t.kind() == TokenKind::Void
                 {
                     let t = self
-                        .tokens
-                        .next()
+                        .take_token()
                         .expect("peek is some")
                         .expect("peek is ok");
                     Ok((TypeAtom::VoidPointer, token.span() + t.span()))
@@ -650,12 +737,7 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
         let mut variadic = false;
         let mut span = Span::none();
-        while let Some(t) = self.tokens.peek() {
-            if t.is_err() {
-                let t = self.tokens.next().expect("peek is some");
-                return Err(vec![t.expect_err("t.is_err() called above").into()]);
-            }
-            let t = t.as_ref().expect("checked above");
+        while let Some(t) = self.peek_token().map_err(|e| vec![e.into()])? {
             span += t.span();
             match t.value {
                 TokenValue::Ident(_) if !variadic => {
@@ -667,11 +749,17 @@ impl<'a> Parser<'a> {
                     args.push(ty);
                 }
                 TokenValue::RParen => {
-                    let _ = self.tokens.next().unwrap().map_err(|e| vec![e.into()])?;
+                    let _ = self
+                        .take_token()
+                        .expect("checked above")
+                        .expect("checked above");
                     break;
                 }
                 TokenValue::Ellipsis if !variadic => {
-                    let t = self.tokens.next().unwrap().map_err(|e| vec![e.into()])?;
+                    let t = self
+                        .take_token()
+                        .expect("checked above")
+                        .expect("checked above");
                     if !allow_variadic {
                         return Err(vec![ParseError::unexpected_token(
                             t,
@@ -681,7 +769,10 @@ impl<'a> Parser<'a> {
                     variadic = true;
                 }
                 _ => {
-                    let t = self.tokens.next().unwrap().map_err(|e| vec![e.into()])?;
+                    let t = self
+                        .take_token()
+                        .expect("checked above")
+                        .expect("checked above");
                     return Err(vec![ParseError::unexpected_token(
                         t,
                         if variadic {
@@ -716,14 +807,13 @@ impl<'a> Parser<'a> {
         let (ident_token, ident) = expect_token!(self, Ident(_));
         span += ident_token.span();
 
-        let Some(next) = self.tokens.peek() else {
+        let Some(next) = self.peek_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 self.end_span(),
                 &[TokenKind::LParen, TokenKind::Arrow, TokenKind::Semicolon],
                 None,
             )]);
         };
-        let next = next.as_ref().map_err(|e| vec![e.clone().into()])?;
         span += next.span();
         let (args, variadic, args_span) = match next.kind() {
             TokenKind::LParen => {
@@ -734,21 +824,22 @@ impl<'a> Parser<'a> {
             TokenKind::Semicolon => (Vec::new(), false, next.span()),
             _ => {
                 return Err(vec![ParseError::unexpected_token(
-                    self.tokens.next().unwrap().expect("error checked above"),
+                    self.take_token()
+                        .expect("checked above")
+                        .expect("checked above"),
                     &[TokenKind::LParen, TokenKind::Arrow, TokenKind::Semicolon],
                 )]);
             }
         };
         span += args_span;
 
-        let Some(next) = self.tokens.next() else {
+        let Some(next) = self.take_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 self.end_span(),
                 &[TokenKind::Semicolon, TokenKind::Arrow],
                 None,
             )]);
         };
-        let next = next.map_err(|e| vec![e.into()])?;
         span += next.span();
         let returns = match next.kind() {
             TokenKind::Semicolon => Vec::new(),
@@ -918,14 +1009,13 @@ impl<'a> Parser<'a> {
         let (ident_token, ident) = expect_token!(self, Ident(_));
         span += ident_token.span();
 
-        let Some(next) = self.tokens.peek() else {
+        let Some(next) = self.peek_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 self.end_span(),
                 &[TokenKind::LParen, TokenKind::Arrow, TokenKind::LCurly],
                 None,
             )]);
         };
-        let next = next.as_ref().map_err(|e| vec![e.clone().into()])?;
         span += next.span();
         let (args, _, args_span) = match next.kind() {
             TokenKind::LParen => {
@@ -937,21 +1027,22 @@ impl<'a> Parser<'a> {
             TokenKind::LCurly => (Vec::new(), false, next.span()),
             _ => {
                 return Err(vec![ParseError::unexpected_token(
-                    self.tokens.next().unwrap().expect("error checked above"),
+                    self.take_token()
+                        .expect("checked above")
+                        .expect("checked above"),
                     &[TokenKind::LCurly, TokenKind::Arrow],
                 )]);
             }
         };
         span += args_span;
 
-        let Some(next) = self.tokens.next() else {
+        let Some(next) = self.take_token().map_err(|e| vec![e.into()])? else {
             return Err(vec![ParseError::unexpected_eof(
                 self.end_span(),
                 &[TokenKind::LCurly, TokenKind::Arrow],
                 None,
             )]);
         };
-        let next = next.map_err(|e| vec![e.into()])?;
         span += next.span();
         let (returns, body_open) = match next.kind() {
             TokenKind::LCurly => (Vec::new(), next),
@@ -1060,6 +1151,80 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn expand_macro(&mut self, m: Macro, span: Span) -> Result<(), Vec<ParseError>> {
+        let mut errors = Vec::new();
+        let mut arg_values = HashMap::new();
+        if let Some(args) = m.args {
+            expect_token!(self, LParen);
+            'arg_loop: for (i, arg) in args.iter().enumerate() {
+                if i > 0 {
+                    expect_token!(self, Comma);
+                }
+                let tok = match arg.kind {
+                    MacroArgKind::Ident => expect_token!(self, Ident(_)).0,
+                    MacroArgKind::Token => {
+                        let Some(token) = self.take_token().map_err(|e| vec![e.into()])? else {
+                            return Err(vec![ParseError::unexpected_eof(
+                                self.end_span(),
+                                &[],
+                                None,
+                            )]);
+                        };
+                        token
+                    }
+                    MacroArgKind::Literal => 'x: {
+                        if let Some(t) = try_expect_token!(self, NumLit) {
+                            break 'x t;
+                        };
+                        if let Some(t) = try_expect_token!(self, StrLit) {
+                            break 'x t;
+                        };
+                        if let Some(t) = try_expect_token!(self, CStrLit) {
+                            break 'x t;
+                        };
+                        if let Some(t) = try_expect_token!(self, BoolLit) {
+                            break 'x t;
+                        };
+                        let token = self.take_token().unwrap().unwrap();
+                        errors.push(ParseError::ExpectedLiteral {
+                            span: token.span(),
+                            makro: span,
+                            kind: token.kind(),
+                        });
+                        continue 'arg_loop;
+                    }
+                };
+                arg_values.insert(arg.name.clone(), tok);
+            }
+            expect_token!(self, RParen);
+        }
+        self.queued_tokens.reserve(m.tokens.len());
+        for t in m.tokens.iter().rev().cloned() {
+            let span = t.span();
+            let t = match t.value {
+                TokenValue::MacroVar(v) => {
+                    if let Some(t) = arg_values.get(&v) {
+                        t.clone()
+                    } else {
+                        errors.push(ParseError::UndefinedMacroVariable {
+                            var: v,
+                            span,
+                            makro: m.ident_span,
+                        });
+                        continue;
+                    }
+                }
+                _ => t,
+            };
+            self.queued_tokens.push_front(t);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     fn parse_body(
         &mut self,
         end_token: TokenKind,
@@ -1068,18 +1233,50 @@ impl<'a> Parser<'a> {
         let mut out = Vec::new();
         let mut errors = Vec::new();
 
-        while let Some(token) = self.tokens.next() {
+        loop {
+            let token = match self.take_token() {
+                Ok(Some(token)) => token,
+                Ok(None) => break,
+                Err(e) => {
+                    errors.push(e.into());
+                    continue;
+                }
+            };
+
             let x = || {
-                let token = token.map_err(|e| vec![e.into()])?;
+                let token = token;
                 if token.kind() == end_token {
                     return Ok(Some((std::mem::take(&mut out), token)));
                 }
+                let span = token.span();
                 match token.value {
                     TokenValue::PathSep | TokenValue::Ident(_) => {
                         let ident = self.take_ident(token)?;
                         out.push(Ast::Ident(ident));
                     }
-                    TokenValue::LParen
+                    TokenValue::MacroIdent(ident) => {
+                        if let Some(m) = self.macros.get(&ident) {
+                            self.expand_macro(m.clone(), span)?;
+                        } else {
+                            // consume args, as that's probably what the user wants
+                            let mut span = span;
+                            if try_expect_token!(self, LParen).is_some() {
+                                loop {
+                                    if let Some(rparen) = try_expect_token!(self, RParen) {
+                                        span += rparen.span();
+                                        break;
+                                    }
+                                    let t = self.take_token().unwrap().unwrap();
+                                    span += t.span();
+                                }
+                            }
+                            return Err(vec![ParseError::UndefinedMacro { name: ident, span }]);
+                        }
+                    }
+                    TokenValue::MacroVar(_)
+                    | TokenValue::Comma
+                    | TokenValue::Colon
+                    | TokenValue::LParen
                     | TokenValue::RParen
                     | TokenValue::LCurly
                     | TokenValue::RCurly
@@ -1091,7 +1288,8 @@ impl<'a> Parser<'a> {
                     | TokenValue::Pub
                     | TokenValue::Mod
                     | TokenValue::Use
-                    | TokenValue::As => Err(vec![ParseError::unexpected_token(token, &[])])?,
+                    | TokenValue::As
+                    | TokenValue::Macro => Err(vec![ParseError::unexpected_token(token, &[])])?,
                     TokenValue::StrLit(_)
                     | TokenValue::CStrLit(_)
                     | TokenValue::NumLit(_)
@@ -1168,12 +1366,22 @@ impl<'a> Parser<'a> {
 
         let mut errors = Vec::new();
 
-        while let Some(token) = self.tokens.next() {
+        loop {
+            let token = match self.take_token() {
+                Ok(Some(token)) => token,
+                Ok(None) => break,
+                Err(e) => {
+                    errors.push(e.into());
+                    continue;
+                }
+            };
+
+            let span = token.span();
             let x = || {
-                let token = token.map_err(|e| vec![e.into()])?;
                 match token.value {
                     TokenValue::PathSep
                     | TokenValue::Ident(_)
+                    | TokenValue::MacroVar(_)
                     | TokenValue::LParen
                     | TokenValue::RParen
                     | TokenValue::LCurly
@@ -1183,6 +1391,8 @@ impl<'a> Parser<'a> {
                     | TokenValue::CStrLit(_)
                     | TokenValue::NumLit(_)
                     | TokenValue::BoolLit(_)
+                    | TokenValue::Comma
+                    | TokenValue::Colon
                     | TokenValue::Plus
                     | TokenValue::Minus
                     | TokenValue::Asterisk
@@ -1221,6 +1431,131 @@ impl<'a> Parser<'a> {
                     TokenValue::Fn => {
                         let f = self.take_fn(Visibility::Private, token.span())?;
                         out.push(Ast::Fn(f));
+                    }
+                    TokenValue::Macro => {
+                        let (ident_tok, ident) = expect_token!(self, MacroIdent(_));
+                        let mut errors = Vec::new();
+                        let args = if try_expect_token!(self, LParen).is_some() {
+                            let mut args = Vec::new();
+                            loop {
+                                if try_expect_token!(self, RParen).is_some() {
+                                    break;
+                                }
+                                if !args.is_empty() {
+                                    expect_token!(self, Comma);
+                                }
+                                let (name_tok, name) = expect_token!(self, MacroVar(_));
+                                let _ = expect_token!(self, Colon);
+                                let (kind_tok, kind) = expect_token!(self, Ident(_));
+                                let Some(kind) = MACRO_ARG_KIND.get(&kind) else {
+                                    errors.push(ParseError::InvalidMacroArgKind {
+                                        arg: name_tok.span(),
+                                        kind,
+                                        kind_span: kind_tok.span(),
+                                    });
+                                    continue;
+                                };
+
+                                args.push(MacroArg {
+                                    name_span: name_tok.span(),
+                                    name,
+                                    kind: *kind,
+                                });
+                            }
+                            Some(args)
+                        } else {
+                            None
+                        };
+                        let m = if let Some(open) = try_expect_token!(self, LCurly) {
+                            let mut depth = 0;
+                            let mut tokens = Vec::new();
+                            let span = loop {
+                                let body = match self.take_token() {
+                                    Ok(Some(body)) => body,
+                                    Ok(None) => {
+                                        errors.push(ParseError::unexpected_eof(
+                                            self.end_span(),
+                                            &[],
+                                            None,
+                                        ));
+                                        return Err(errors);
+                                    }
+                                    Err(e) => {
+                                        errors.push(e.into());
+                                        continue;
+                                    }
+                                };
+
+                                match body.kind() {
+                                    TokenKind::LCurly => {
+                                        depth += 1;
+                                        tokens.push(body);
+                                    }
+                                    TokenKind::RCurly if depth == 0 => {
+                                        break open.span() + body.span();
+                                    }
+                                    TokenKind::RCurly => {
+                                        depth -= 1;
+                                        tokens.push(body);
+                                    }
+                                    _ => tokens.push(body),
+                                }
+                            };
+                            Macro {
+                                macro_span: token.span(),
+                                ident_span: ident_tok.span(),
+                                body_span: span,
+                                tokens,
+                                args,
+                            }
+                        } else {
+                            match self.take_token() {
+                                Ok(Some(body)) => Macro {
+                                    macro_span: token.span(),
+                                    ident_span: ident_tok.span(),
+                                    body_span: body.span(),
+                                    tokens: vec![body],
+                                    args,
+                                },
+                                Ok(None) => {
+                                    errors.push(ParseError::unexpected_eof(
+                                        self.end_span(),
+                                        &[],
+                                        None,
+                                    ));
+                                    return Err(errors);
+                                }
+                                Err(e) => {
+                                    errors.push(e.into());
+                                    return Err(errors);
+                                }
+                            }
+                        };
+
+                        if !errors.is_empty() {
+                            return Err(errors);
+                        }
+
+                        self.macros.insert(ident, m);
+                    }
+                    TokenValue::MacroIdent(ident) => {
+                        if let Some(m) = self.macros.get(&ident) {
+                            self.expand_macro(m.clone(), span)?;
+                        } else {
+                            // consume args, as that's probably what the user wants
+                            let mut span = span;
+                            if try_expect_token!(self, LParen).is_some() {
+                                loop {
+                                    if let Some(rparen) = try_expect_token!(self, RParen) {
+                                        span += rparen.span();
+                                        break;
+                                    }
+                                    let t = self.take_token().unwrap().unwrap();
+                                    span += t.span();
+                                }
+                            }
+                            return Err(vec![ParseError::UndefinedMacro { name: ident, span }]);
+                        }
                     }
                     TokenValue::Pub => 'a: {
                         if let Some(extern_tok) = try_expect_token!(self, Extern) {

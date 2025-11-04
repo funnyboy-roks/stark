@@ -31,6 +31,7 @@ pub const KW_MAP: phf::Map<&'static str, TokenValue> = phf_map! {
     "mod" => TokenValue::Mod,
     "use" => TokenValue::Use,
     "as" => TokenValue::As,
+    "macro" => TokenValue::Macro,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -110,6 +111,12 @@ define_tokens! {
     RCurly = "'}'",
     Semicolon = "';'",
 
+    // Macro items
+    MacroIdent(String) = "<macro identifier>",
+    MacroVar(String) = "<macro variable>",
+    Comma = "','",
+    Colon = "':'",
+
     // Lits
     StrLit(String) = "<string>",
     CStrLit(CString) = "<c-string>",
@@ -157,6 +164,7 @@ define_tokens! {
     Mod = "'mod'",
     Use = "'use'",
     As = "'as'",
+    Macro = "'macro'",
 
     Then = "'then'",
     Else = "'else'",
@@ -582,8 +590,30 @@ impl Iterator for Lexer<'_> {
                         Token::new(start..self.offset, self.file, TokenValue::from_ident(&n))
                     }));
                 }
+                ('#', Some('a'..='z' | 'A'..='Z' | '_')) => {
+                    self.offset += 1;
+                    return Some(self.take_ident().map(|n| {
+                        Token::new(
+                            start..self.offset,
+                            self.file,
+                            TokenValue::MacroIdent(n.to_string()),
+                        )
+                    }));
+                }
+                ('$', Some('a'..='z' | 'A'..='Z' | '_')) => {
+                    self.offset += 1;
+                    return Some(self.take_ident().map(|n| {
+                        Token::new(
+                            start..self.offset,
+                            self.file,
+                            TokenValue::MacroVar(n.to_string()),
+                        )
+                    }));
+                }
                 (':', Some(':')) => token!(2, PathSep),
                 (';', _) => token!(1, Semicolon),
+                (',', _) => token!(1, Comma),
+                (':', _) => token!(1, Colon),
                 ('+', _) => token!(1, Plus),
                 ('(', _) => token!(1, LParen),
                 (')', _) => token!(1, RParen),
