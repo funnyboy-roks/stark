@@ -501,43 +501,28 @@ impl Builtin {
                 }
             }
             Builtin::And => {
-                let ty = &type_stack[len - 1];
-                assert!(type_stack[len - 1].is_integer());
-                assert!(type_stack[len - 2].is_integer());
+                assert!(type_stack[len - 1].is_integer() || type_stack[len - 1] == ty!(bool));
+                assert!(type_stack[len - 2].is_integer() || type_stack[len - 2] == ty!(bool));
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
-                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
-                writeln!(
-                    writer,
-                    "    and qword [rsp], {}",
-                    Register::Rax.for_size(ty.size())
-                )?;
+                writeln!(writer, "    popq {}", Register::Rax.for_size(8))?;
+                writeln!(writer, "    and qword [rsp], {}", Register::Rax.for_size(8))?;
             }
             Builtin::Or => {
-                let ty = &type_stack[len - 1];
-                assert!(type_stack[len - 1].is_integer());
-                assert!(type_stack[len - 2].is_integer());
+                assert!(type_stack[len - 1].is_integer() || type_stack[len - 1] == ty!(bool));
+                assert!(type_stack[len - 2].is_integer() || type_stack[len - 2] == ty!(bool));
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
-                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
-                writeln!(
-                    writer,
-                    "    or qword [rsp], {}",
-                    Register::Rax.for_size(ty.size())
-                )?;
+                writeln!(writer, "    popq {}", Register::Rax.for_size(8))?;
+                writeln!(writer, "    or qword [rsp], {}", Register::Rax.for_size(8))?;
             }
             Builtin::Xor => {
-                let ty = &type_stack[len - 1];
-                assert!(type_stack[len - 1].is_integer());
-                assert!(type_stack[len - 2].is_integer());
+                assert!(type_stack[len - 1].is_integer() || type_stack[len - 1] == ty!(bool));
+                assert!(type_stack[len - 2].is_integer() || type_stack[len - 2] == ty!(bool));
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
-                writeln!(writer, "    popq {}", Register::Rax.for_size(ty.size()))?;
-                writeln!(
-                    writer,
-                    "    xor qword [rsp], {}",
-                    Register::Rax.for_size(ty.size())
-                )?;
+                writeln!(writer, "    popq {}", Register::Rax.for_size(8))?;
+                writeln!(writer, "    xor qword [rsp], {}", Register::Rax.for_size(8))?;
             }
             Builtin::BitNot => {
                 assert!(type_stack[len - 1].is_integer());

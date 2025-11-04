@@ -30,6 +30,27 @@ fn not_test {
     true  blackbox ! c"    true  ! => Expected: false (0), Actual: %d\n" printf(2)
 }
 
+fn and_bool_test {
+    false false blackbox & c"    (false false &) => Expected: 0, Actual: %d\n" printf(2)
+    false true  blackbox & c"    (false true  &) => Expected: 0, Actual: %d\n" printf(2)
+    true  false blackbox & c"    (true  false &) => Expected: 0, Actual: %d\n" printf(2)
+    true  true  blackbox & c"    (true  true  &) => Expected: 1, Actual: %d\n" printf(2)
+}
+
+fn or_bool_test {
+    false false blackbox | c"    (false false |) => Expected: 0, Actual: %d\n" printf(2)
+    false true  blackbox | c"    (false true  |) => Expected: 1, Actual: %d\n" printf(2)
+    true  false blackbox | c"    (true  false |) => Expected: 1, Actual: %d\n" printf(2)
+    true  true  blackbox | c"    (true  true  |) => Expected: 1, Actual: %d\n" printf(2)
+}
+
+fn xor_bool_test {
+    false false blackbox ^ c"    (false false ^) => Expected: 0, Actual: %d\n" printf(2)
+    false true  blackbox ^ c"    (false true  ^) => Expected: 1, Actual: %d\n" printf(2)
+    true  false blackbox ^ c"    (true  false ^) => Expected: 1, Actual: %d\n" printf(2)
+    true  true  blackbox ^ c"    (true  true  ^) => Expected: 0, Actual: %d\n" printf(2)
+}
+
 fn and_test {
     1 2 blackbox & c"    (1 2 &) => Expected: 0, Actual: %d\n" printf(2)
     1 1 blackbox & c"    (1 1 &) => Expected: 1, Actual: %d\n" printf(2)
@@ -157,9 +178,15 @@ fn main() {
     c"dup_test\n"             printf dup_test
     c"dup2_test\n"            printf dup2_test
     c"not_test\n"             printf not_test
+
+    c"and_bool_test\n"        printf and_bool_test
+    c"or_bool_test\n"         printf or_bool_test
+    c"xor_bool_test\n"        printf xor_bool_test
+
     c"and_test\n"             printf and_test
     c"or_test\n"              printf or_test
     c"xor_test\n"             printf xor_test
+
     c"bitnot_test\n"          printf bitnot_test
     c"shl_test\n"             printf shl_test
     c"shr_test\n"             printf shr_test

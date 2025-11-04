@@ -14,6 +14,21 @@ STDOUT:
     not_test
         false ! => Expected: true  (1), Actual: 1
         true  ! => Expected: false (0), Actual: 0
+    and_bool_test
+        (false false &) => Expected: 0, Actual: 0
+        (false true  &) => Expected: 0, Actual: 0
+        (true  false &) => Expected: 0, Actual: 0
+        (true  true  &) => Expected: 1, Actual: 1
+    or_bool_test
+        (false false |) => Expected: 0, Actual: 0
+        (false true  |) => Expected: 1, Actual: 1
+        (true  false |) => Expected: 1, Actual: 1
+        (true  true  |) => Expected: 1, Actual: 1
+    xor_bool_test
+        (false false ^) => Expected: 0, Actual: 0
+        (false true  ^) => Expected: 1, Actual: 1
+        (true  false ^) => Expected: 1, Actual: 1
+        (true  true  ^) => Expected: 0, Actual: 0
     and_test
         (1 2 &) => Expected: 0, Actual: 0
         (1 1 &) => Expected: 1, Actual: 1
