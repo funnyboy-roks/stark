@@ -1,5 +1,6 @@
 use std::{
     ffi::CString,
+    fmt::{Debug, Display},
     iter::Peekable,
     ops::{Deref, DerefMut},
 };
@@ -446,7 +447,29 @@ impl Spanned for Ast {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DisplayList<'a, D: Display>(&'a [D]);
+impl<D: Display> Display for DisplayList<'_, D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            [] => write!(f, "token"),
+            [a] => write!(f, "{a}"),
+            [a, b] => write!(f, "one of {a} or {b}"),
+            expected => {
+                for (i, e) in expected.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{e}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 pub struct Parser<'a> {
+    len: usize,
     tokens: Peekable<Lexer<'a>>,
 }
 
@@ -455,33 +478,22 @@ pub enum ParseError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     LexError(#[from] LexError),
-    #[error("Unexpected token '{found:?}'")]
+    #[error("Expected {expected}, found {found}")]
     UnexpectedToken {
         #[label = "here"]
         span: Span,
         found: TokenKind,
-    },
-    #[error("Unexpected token '{found:?}' Expected '{expected:?}'")]
-    UnexpectedTokenExpected {
-        #[label = "here"]
-        span: Span,
-        found: TokenKind,
-        expected: TokenKind,
-    },
-    #[error("Unexpected token '{found:?}' Expected one of '{expected:?}'")]
-    UnexpectedTokenExpectedMany {
-        #[label = "here"]
-        span: Span,
-        found: TokenKind,
-        expected: &'static [TokenKind],
+        expected: DisplayList<'static, TokenKind>,
     },
     #[error("Expected {expected}, found EOF")]
     UnexpectedEof {
-        expected: String,
+        #[label("Expected {expected}, found EOF")]
+        span: Span,
+        expected: DisplayList<'static, TokenKind>,
         #[label = "while matching this"]
         matching: Option<Span>,
     },
-    #[error("Expected integer, found float value {found}")]
+    #[error("Expected integer, found float value {found:?}")]
     ExpectedInteger {
         #[label = "here"]
         span: Span,
@@ -503,22 +515,22 @@ pub enum ParseError {
 }
 
 impl ParseError {
+    pub fn unexpected_eof(
+        span: Span,
+        expected: &'static [TokenKind],
+        matching: Option<&Token>,
+    ) -> Self {
+        Self::UnexpectedEof {
+            span,
+            expected: DisplayList(expected),
+            matching: matching.map(|t| t.span()),
+        }
+    }
     pub fn unexpected_token(token: Token, expected: &'static [TokenKind]) -> Self {
-        match expected {
-            [] => Self::UnexpectedToken {
-                span: token.span(),
-                found: token.kind(),
-            },
-            [expected] => Self::UnexpectedTokenExpected {
-                span: token.span(),
-                found: token.kind(),
-                expected: *expected,
-            },
-            _ => Self::UnexpectedTokenExpectedMany {
-                span: token.span(),
-                found: token.kind(),
-                expected,
-            },
+        Self::UnexpectedToken {
+            span: token.span(),
+            found: token.kind(),
+            expected: DisplayList(expected),
         }
     }
 }
@@ -526,10 +538,11 @@ impl ParseError {
 macro_rules! expect_token {
     ($self: ident, $ident: ident) => {{
         let Some(token) = $self.tokens.next() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "token".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                $self.end_span(),
+                &[TokenKind::$ident],
+                None,
+            )]);
         };
 
         let token = token.map_err(|e| vec![e.into()])?;
@@ -546,10 +559,11 @@ macro_rules! expect_token {
     }};
     ($self: ident, $ident: ident(_)) => {{
         let Some(token) = $self.tokens.next() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "token".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                $self.end_span(),
+                &[TokenKind::$ident],
+                None,
+            )]);
         };
 
         let token = token.map_err(|e| vec![e.into()])?;
@@ -598,16 +612,22 @@ macro_rules! try_expect_token {
 impl<'a> Parser<'a> {
     pub fn new(lexer: Lexer<'a>) -> Self {
         Self {
+            len: lexer.content.len(),
             tokens: lexer.peekable(),
         }
     }
 
+    fn end_span(&self) -> Span {
+        Span::new(self.len.saturating_sub(1)..self.len)
+    }
+
     fn take_type(&mut self) -> Result<(TypeAtom, Span), Vec<ParseError>> {
         let Some(token) = self.tokens.next() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "type".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                self.end_span(),
+                &[TokenKind::Asterisk, TokenKind::Ident],
+                None,
+            )]);
         };
 
         let token = token.map_err(|e| vec![e.into()])?;
@@ -704,10 +724,11 @@ impl<'a> Parser<'a> {
         span += ident_token.span();
 
         let Some(next) = self.tokens.peek() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "token".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                self.end_span(),
+                &[TokenKind::LParen, TokenKind::Arrow, TokenKind::Semicolon],
+                None,
+            )]);
         };
         let next = next.as_ref().map_err(|e| vec![e.clone().into()])?;
         span += next.span();
@@ -721,17 +742,18 @@ impl<'a> Parser<'a> {
             _ => {
                 return Err(vec![ParseError::unexpected_token(
                     self.tokens.next().unwrap().expect("error checked above"),
-                    &[TokenKind::LCurly, TokenKind::Arrow],
+                    &[TokenKind::LParen, TokenKind::Arrow, TokenKind::Semicolon],
                 )]);
             }
         };
         span += args_span;
 
         let Some(next) = self.tokens.next() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "token".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                self.end_span(),
+                &[TokenKind::Semicolon, TokenKind::Arrow],
+                None,
+            )]);
         };
         let next = next.map_err(|e| vec![e.into()])?;
         span += next.span();
@@ -904,10 +926,11 @@ impl<'a> Parser<'a> {
         span += ident_token.span();
 
         let Some(next) = self.tokens.peek() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "token".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                self.end_span(),
+                &[TokenKind::LParen, TokenKind::Arrow, TokenKind::LCurly],
+                None,
+            )]);
         };
         let next = next.as_ref().map_err(|e| vec![e.clone().into()])?;
         span += next.span();
@@ -929,10 +952,11 @@ impl<'a> Parser<'a> {
         span += args_span;
 
         let Some(next) = self.tokens.next() else {
-            return Err(vec![ParseError::UnexpectedEof {
-                expected: "token".into(),
-                matching: None,
-            }]);
+            return Err(vec![ParseError::unexpected_eof(
+                self.end_span(),
+                &[TokenKind::LCurly, TokenKind::Arrow],
+                None,
+            )]);
         };
         let next = next.map_err(|e| vec![e.into()])?;
         span += next.span();
@@ -1136,10 +1160,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        errors.push(ParseError::UnexpectedEof {
-            expected: format!("{:?}", end_token),
-            matching: open_token.map(|t| t.span()),
-        });
+        errors.push(ParseError::unexpected_eof(self.end_span(), &[], open_token));
         Err(errors)
     }
 
