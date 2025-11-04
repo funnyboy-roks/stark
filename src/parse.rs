@@ -131,6 +131,12 @@ pub enum AtomKind {
     Gt,
     Gte,
     Percent,
+    Ampersand,
+    Pipe,
+    Caret,
+    Tilde,
+    Shl,
+    Shr,
 
     // Keywords
     Swap,
@@ -167,6 +173,12 @@ impl TryFrom<TokenValue> for AtomKind {
             TokenValue::Gt => Ok(Self::Gt),
             TokenValue::Gte => Ok(Self::Gte),
             TokenValue::Percent => Ok(Self::Percent),
+            TokenValue::Ampersand => Ok(Self::Ampersand),
+            TokenValue::Pipe => Ok(Self::Pipe),
+            TokenValue::Caret => Ok(Self::Caret),
+            TokenValue::Tilde => Ok(Self::Tilde),
+            TokenValue::Shl => Ok(Self::Shl),
+            TokenValue::Shr => Ok(Self::Shr),
             TokenValue::Ellipsis => Err(()),
             TokenValue::Arrow => Err(()),
             TokenValue::Dup => Err(()),
@@ -1107,6 +1119,12 @@ impl<'a> Parser<'a> {
                     | TokenValue::Gt
                     | TokenValue::Gte
                     | TokenValue::Percent
+                    | TokenValue::Ampersand
+                    | TokenValue::Pipe
+                    | TokenValue::Caret
+                    | TokenValue::Tilde
+                    | TokenValue::Shl
+                    | TokenValue::Shr
                     | TokenValue::Swap
                     | TokenValue::Drop
                     | TokenValue::Load
@@ -1195,6 +1213,12 @@ impl<'a> Parser<'a> {
                     | TokenValue::Gt
                     | TokenValue::Gte
                     | TokenValue::Percent
+                    | TokenValue::Ampersand
+                    | TokenValue::Pipe
+                    | TokenValue::Caret
+                    | TokenValue::Tilde
+                    | TokenValue::Shl
+                    | TokenValue::Shr
                     | TokenValue::Equal
                     | TokenValue::Swap
                     | TokenValue::Drop

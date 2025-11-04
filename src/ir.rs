@@ -594,6 +594,41 @@ impl Type {
         }
     }
 
+    /// self [&|^] other
+    pub fn and_or_xor(&self, other: &Type) -> Option<Vec<Self>> {
+        if self.is_integer() && self == other || *self == Type::Integer && other.is_integer() {
+            return Some(vec![self.clone()]);
+        }
+        match self {
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::Integer => match other {
+                Type::Integer => Some(vec![self.clone()]),
+                _ => None,
+            },
+            Type::F32 | Type::F64 | Type::Float => None,
+            Type::Pointer(_) | Type::VoidPointer => None,
+            Type::FatPointer => None,
+            Type::Struct => None,
+            Type::Bool if *other == Type::Bool => Some(vec![self.clone()]),
+            Type::Bool => None,
+        }
+    }
+
+    /// self (<<|>>) other
+    pub fn bitshift(&self, other: &Type) -> Option<Vec<Self>> {
+        if self.is_integer() && self == other || *self == Type::Integer && other.is_integer() {
+            return Some(vec![self.clone()]);
+        }
+        None
+    }
+
     /// self + other
     pub fn add(&self, other: &Type) -> Option<Vec<Self>> {
         match self {
@@ -929,6 +964,12 @@ pub enum Builtin {
     Mul,
     Div,
     Mod,
+    And,
+    Or,
+    Xor,
+    BitNot,
+    Shl,
+    Shr,
     Equal,
     Not,
     NotEqual,
@@ -996,7 +1037,40 @@ impl Builtin {
                     .ok_or(IrGenError::StackUnderflow { span })?;
                 let returns = a.modulo(b).ok_or_else(|| IrGenError::TypeError2 {
                     span,
-                    message: format!("Cannot perform module of {} by {}", a, b),
+                    message: format!("Cannot perform modulo of {} by {}", a, b),
+                })?;
+                Ok((2, returns))
+            }
+            Builtin::And | Builtin::Or | Builtin::Xor => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.and_or_xor(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot perform {:?} of {} and {}", self, a, b),
+                })?;
+                Ok((2, returns))
+            }
+            Builtin::BitNot => {
+                let a = type_stack
+                    .last()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                if a.is_integer() {
+                    Ok((1, vec![a.clone()]))
+                } else {
+                    Err(IrGenError::TypeError2 {
+                        span,
+                        message: format!("Cannot perform bitwise not on {}", a),
+                    })
+                }
+            }
+            Builtin::Shl | Builtin::Shr => {
+                let [b, a] = type_stack
+                    .last_chunk::<2>()
+                    .ok_or(IrGenError::StackUnderflow { span })?;
+                let returns = a.bitshift(b).ok_or_else(|| IrGenError::TypeError2 {
+                    span,
+                    message: format!("Cannot perform {:?} of {} by {}", self, a, b),
                 })?;
                 Ok((2, returns))
             }
@@ -1296,9 +1370,121 @@ impl Builtin {
                 ir_stack.pop().expect("checked by caller");
                 Ok(())
             }
-            // TODO: load from cstring
             Builtin::Load => Ok(()),
             Builtin::Store => Ok(()),
+            Builtin::And | Builtin::Or | Builtin::Xor => {
+                let [a_ty, b_ty] = type_stack else {
+                    unreachable!("checked by caller")
+                };
+                let b_ir = ir_stack.pop().expect("checked by caller");
+                let a_ir = ir_stack.pop().expect("checked by caller");
+                let result_ty = a_ty.and_or_xor(b_ty).unwrap().pop().unwrap();
+
+                let span = b_ir.span + a_ir.span + current.span;
+                match b_ty {
+                    Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::I64
+                    | Type::U8
+                    | Type::U16
+                    | Type::U32
+                    | Type::U64
+                    | Type::Integer => {
+                        let (IrKind::PushInt(b, _), IrKind::PushInt(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
+                        else {
+                            panic!("checked by caller")
+                        };
+                        ir_stack.push(Ir::new(
+                            span,
+                            IrKind::PushInt(
+                                match self {
+                                    Builtin::And => *a & *b,
+                                    Builtin::Or => *a | *b,
+                                    Builtin::Xor => *a ^ *b,
+                                    _ => unreachable!(),
+                                },
+                                result_ty.into(),
+                            ),
+                        ))
+                    }
+                    Type::F32 | Type::F64 | Type::Float => unreachable!(),
+                    Type::Pointer(_) | Type::VoidPointer => unreachable!(),
+                    Type::FatPointer => unreachable!(),
+                    Type::Struct => unreachable!(),
+                    Type::Bool => {
+                        let (IrKind::PushBool(b), IrKind::PushBool(a)) = (&b_ir.kind, &a_ir.kind)
+                        else {
+                            panic!("checked by caller")
+                        };
+                        ir_stack.push(Ir::new(
+                            span,
+                            IrKind::PushBool(match self {
+                                Builtin::And => *a && *b,
+                                Builtin::Or => *a || *b,
+                                Builtin::Xor => *a ^ *b,
+                                _ => unreachable!(),
+                            }),
+                        ))
+                    }
+                };
+
+                Ok(())
+            }
+            Builtin::BitNot => {
+                let b_ir = ir_stack.pop().unwrap();
+                let IrKind::PushInt(b, kind) = b_ir.kind else {
+                    panic!("checked by caller")
+                };
+                ir_stack.push(Ir::new(current.span + b_ir.span, IrKind::PushInt(!b, kind)));
+                Ok(())
+            }
+            Builtin::Shl | Builtin::Shr => {
+                let [a_ty, b_ty] = type_stack else {
+                    unreachable!("checked by caller")
+                };
+                let b_ir = ir_stack.pop().expect("checked by caller");
+                let a_ir = ir_stack.pop().expect("checked by caller");
+                let result_ty = a_ty.bitshift(b_ty).unwrap().pop().unwrap();
+
+                let span = b_ir.span + a_ir.span + current.span;
+                match b_ty {
+                    Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::I64
+                    | Type::U8
+                    | Type::U16
+                    | Type::U32
+                    | Type::U64
+                    | Type::Integer => {
+                        let (IrKind::PushInt(b, _), IrKind::PushInt(a, _)) =
+                            (&b_ir.kind, &a_ir.kind)
+                        else {
+                            panic!("checked by caller")
+                        };
+                        ir_stack.push(Ir::new(
+                            span,
+                            IrKind::PushInt(
+                                match self {
+                                    Builtin::Shl => *a << *b,
+                                    Builtin::Shr => *a >> *b,
+                                    _ => unreachable!(),
+                                },
+                                result_ty.into(),
+                            ),
+                        ))
+                    }
+                    Type::F32 | Type::F64 | Type::Float => unreachable!(),
+                    Type::Pointer(_) | Type::VoidPointer => unreachable!(),
+                    Type::FatPointer => unreachable!(),
+                    Type::Struct => unreachable!(),
+                    Type::Bool => unreachable!(),
+                };
+
+                Ok(())
+            }
         }
     }
 }
@@ -2129,6 +2315,12 @@ impl Module {
                 AtomKind::Asterisk => builtin!(atom, Mul),
                 AtomKind::Slash => builtin!(atom, Div),
                 AtomKind::Percent => builtin!(atom, Mod),
+                AtomKind::Ampersand => builtin!(atom, And),
+                AtomKind::Pipe => builtin!(atom, Or),
+                AtomKind::Caret => builtin!(atom, Xor),
+                AtomKind::Tilde => builtin!(atom, BitNot),
+                AtomKind::Shl => builtin!(atom, Shl),
+                AtomKind::Shr => builtin!(atom, Shr),
                 AtomKind::Equal => builtin!(atom, Equal),
                 AtomKind::Not => builtin!(atom, Not),
                 AtomKind::Neq => builtin!(atom, NotEqual),
