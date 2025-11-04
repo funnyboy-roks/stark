@@ -59,200 +59,111 @@ pub struct NumLit {
     pub radix: Radix,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TokenKind {
-    Ident,
-    LParen,
-    RParen,
-    LCurly,
-    RCurly,
-    Semicolon,
+macro_rules! define_tokens_inner {
+    (@_ $ty: ty) => {
+        _
+    };
+}
+
+macro_rules! define_tokens {
+    ($( $(#[$($attr: tt)*])* $ident: ident$(($ty: ty))? = $display: literal ),+$(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum TokenKind {
+            $(
+                $(#[$($attr)*])*
+                $ident
+            ),+
+        }
+
+        #[derive(Debug, Clone, PartialEq)]
+        pub enum TokenValue {
+            $(
+                $(#[$($attr)*])*
+                $ident$(($ty))?
+            ),+
+        }
+
+        impl Display for TokenKind {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let s = match self {
+                    $(
+                        Self::$ident => $display
+                    ),+
+                };
+                f.write_str(s)
+            }
+        }
+
+        impl TokenValue {
+            pub const fn kind(&self) -> TokenKind {
+                match self {
+                    $(
+                        Self::$ident$((define_tokens_inner!(@_ $ty)))? => TokenKind::$ident
+                    ),+
+                }
+            }
+        }
+
+    };
+}
+
+define_tokens! {
+    Ident(String) = "<identifier>",
+    LParen = "(",
+    RParen = ")",
+    LCurly = "{",
+    RCurly = "}",
+    Semicolon = ";",
 
     // Lits
-    StrLit,
-    CStrLit,
-    NumLit,
-    BoolLit,
+    StrLit(String) = "<string>",
+    CStrLit(CString) = "<c-string>",
+    NumLit(NumLit) = "<number>",
+    BoolLit(bool) = "<boolean>",
 
     // Ops
-    /// +
-    Plus,
-    /// -
-    Minus,
-    /// *
-    Asterisk,
-    /// /
-    Slash,
-    /// =
-    Equal,
-    /// !
-    Not,
-    /// !=
-    Neq,
-    /// <
-    Lt,
-    /// <=
-    Lte,
-    /// >
-    Gt,
-    /// >=
-    Gte,
-    /// %
-    Percent,
+    Plus = "+",
+    Minus = "-",
+    Asterisk = "*",
+    Slash = "'/'",
+    Equal = "'='",
+    Not = "'!'",
+    Neq = "'!='",
+    Lt = "'<'",
+    Lte = "'<='",
+    Gt = "'>'",
+    Gte = "'>='",
+    Percent = "'%'",
 
     // Symbols
     /// `...`
-    Ellipsis,
+    Ellipsis = "'...'",
     /// `->`
-    Arrow,
+    Arrow = "'->'",
     /// `::`
-    PathSep,
+    PathSep = "'::'",
 
     // Builtins
-    Dup,
-    Swap,
-    Drop,
-    Cast,
-    Load,
-    Store,
+    Dup = "'dup'",
+    Swap = "'swap'",
+    Drop = "'drop'",
+    Cast = "'cast'",
+    Load = "'load'",
+    Store = "'store'",
 
     // Keywords
-    /// `extern`
-    Extern,
-    /// `fn`
-    Fn,
-    /// `void`
-    Void,
-    /// `pub`
-    Pub,
-    /// `mod`
-    Mod,
-    /// `use`
-    Use,
-    /// `as`
-    As,
+    Extern = "'extern'",
+    Fn = "'fn'",
+    Void = "'void'",
+    Pub = "'pub'",
+    Mod = "'mod'",
+    Use = "'use'",
+    As = "'as'",
 
-    Then,
-    Else,
-    While,
-    Break,
-}
-
-impl Display for TokenKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            TokenKind::Ident => "<identifier>",
-            TokenKind::LParen => "'('",
-            TokenKind::RParen => "')'",
-            TokenKind::LCurly => "'{'",
-            TokenKind::RCurly => "'}'",
-            TokenKind::Semicolon => "';'",
-            TokenKind::StrLit => "<string>",
-            TokenKind::CStrLit => "<c-string>",
-            TokenKind::NumLit => "<number>",
-            TokenKind::BoolLit => "<bool>",
-            TokenKind::Plus => "'+'",
-            TokenKind::Minus => "'-'",
-            TokenKind::Asterisk => "'*'",
-            TokenKind::Slash => "'.'",
-            TokenKind::Equal => "'='",
-            TokenKind::Not => "'!'",
-            TokenKind::Neq => "'!='",
-            TokenKind::Lt => "'<'",
-            TokenKind::Lte => "'<='",
-            TokenKind::Gt => "'>'",
-            TokenKind::Gte => "'>='",
-            TokenKind::Percent => "'%'",
-            TokenKind::Ellipsis => "'...'",
-            TokenKind::Arrow => "'->'",
-            TokenKind::PathSep => "'::'",
-            TokenKind::Dup => "'dup'",
-            TokenKind::Swap => "'swap'",
-            TokenKind::Drop => "'drop'",
-            TokenKind::Cast => "'cast'",
-            TokenKind::Load => "'load'",
-            TokenKind::Store => "'store'",
-            TokenKind::Extern => "'extern'",
-            TokenKind::Fn => "'fn'",
-            TokenKind::Void => "'void'",
-            TokenKind::Pub => "'pub'",
-            TokenKind::Mod => "'mod'",
-            TokenKind::Use => "'use'",
-            TokenKind::As => "'as'",
-            TokenKind::Then => "'then'",
-            TokenKind::Else => "'else'",
-            TokenKind::While => "'while'",
-            TokenKind::Break => "'break'",
-        };
-        f.write_str(s)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TokenValue {
-    Ident(String),
-    LParen,
-    RParen,
-    LCurly,
-    RCurly,
-    Semicolon,
-
-    // Lits
-    StrLit(String),
-    CStrLit(CString),
-    NumLit(NumLit),
-    BoolLit(bool),
-
-    // Ops
-    Plus,
-    Minus,
-    Asterisk,
-    Slash,
-    Equal,
-    Not,
-    Neq,
-    Lt,
-    Lte,
-    Gt,
-    Gte,
-    Percent,
-
-    // Symbols
-    /// `...`
-    Ellipsis,
-    /// `->`
-    Arrow,
-    /// `::`
-    PathSep,
-
-    // Builtins
-    Dup,
-    Swap,
-    Drop,
-    Cast,
-    Load,
-    Store,
-
-    // Keywords
-    /// `extern`
-    Extern,
-    /// `fn`
-    Fn,
-    /// `void`
-    Void,
-    /// `pub`
-    Pub,
-    /// `mod`
-    Mod,
-    /// `use`
-    Use,
-    /// `as`
-    As,
-
-    Then,
-    Else,
-    While,
-    Break,
+    Then = "'then'",
+    Else = "'else'",
+    While = "'while'",
+    Break = "'break'",
 }
 
 impl TokenValue {
@@ -261,53 +172,6 @@ impl TokenValue {
             .get(&ident.to_lowercase())
             .cloned() // This is cheap as it's just a unit variant
             .unwrap_or(TokenValue::Ident(ident.into()))
-    }
-
-    pub const fn kind(&self) -> TokenKind {
-        match self {
-            TokenValue::Ident(_) => TokenKind::Ident,
-            TokenValue::LParen => TokenKind::LParen,
-            TokenValue::RParen => TokenKind::RParen,
-            TokenValue::LCurly => TokenKind::LCurly,
-            TokenValue::RCurly => TokenKind::RCurly,
-            TokenValue::Semicolon => TokenKind::Semicolon,
-            TokenValue::StrLit(_) => TokenKind::StrLit,
-            TokenValue::CStrLit(_) => TokenKind::CStrLit,
-            TokenValue::NumLit(_) => TokenKind::NumLit,
-            TokenValue::BoolLit(_) => TokenKind::BoolLit,
-            TokenValue::Plus => TokenKind::Plus,
-            TokenValue::Minus => TokenKind::Minus,
-            TokenValue::Asterisk => TokenKind::Asterisk,
-            TokenValue::Slash => TokenKind::Slash,
-            TokenValue::Equal => TokenKind::Equal,
-            TokenValue::Not => TokenKind::Not,
-            TokenValue::Neq => TokenKind::Neq,
-            TokenValue::Lt => TokenKind::Lt,
-            TokenValue::Lte => TokenKind::Lte,
-            TokenValue::Gt => TokenKind::Gt,
-            TokenValue::Gte => TokenKind::Gte,
-            TokenValue::Percent => TokenKind::Percent,
-            TokenValue::Ellipsis => TokenKind::Ellipsis,
-            TokenValue::PathSep => TokenKind::PathSep,
-            TokenValue::Arrow => TokenKind::Arrow,
-            TokenValue::Dup => TokenKind::Dup,
-            TokenValue::Swap => TokenKind::Swap,
-            TokenValue::Drop => TokenKind::Drop,
-            TokenValue::Extern => TokenKind::Extern,
-            TokenValue::Fn => TokenKind::Fn,
-            TokenValue::Pub => TokenKind::Pub,
-            TokenValue::Mod => TokenKind::Mod,
-            TokenValue::Use => TokenKind::Use,
-            TokenValue::As => TokenKind::As,
-            TokenValue::Cast => TokenKind::Cast,
-            TokenValue::Void => TokenKind::Void,
-            TokenValue::Load => TokenKind::Load,
-            TokenValue::Store => TokenKind::Store,
-            TokenValue::Then => TokenKind::Then,
-            TokenValue::Else => TokenKind::Else,
-            TokenValue::While => TokenKind::While,
-            TokenValue::Break => TokenKind::Break,
-        }
     }
 }
 
