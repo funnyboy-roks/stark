@@ -24,7 +24,7 @@ pub mod lex;
 pub mod parse;
 pub mod span;
 
-fn main() -> Result<(), miette::Error> {
+fn main() {
     let cli = cli::Cli::parse();
 
     let mut content = std::fs::read_to_string(&cli.file).unwrap();
@@ -59,9 +59,8 @@ fn main() -> Result<(), miette::Error> {
             let e = e.with_source_code(src);
             eprintln!("{:?}", e);
         }
+        std::process::exit(1);
     }
-
-    Ok(())
 }
 
 fn main2(cli: &Cli, content: String, errors: &mut Vec<miette::Error>) -> Result<(), ()> {
