@@ -134,6 +134,12 @@ define_tokens! {
     Gt = "'>'",
     Gte = "'>='",
     Percent = "'%'",
+    Ampersand = "'&'",
+    Pipe = "'|'",
+    Caret = "'^'",
+    Tilde = "'~'",
+    Shl = "'<<'",
+    Shr = "'>>'",
 
     // Symbols
     /// `...`
@@ -536,6 +542,16 @@ impl Iterator for Lexer<'_> {
             let c = chars.next()?;
             let c2 = chars.next();
             let start = self.offset;
+            macro_rules! token {
+                ($offset: expr, $token: ident) => {{
+                    self.offset += $offset;
+                    return Some(Ok(Token::new(
+                        start..self.offset,
+                        self.file,
+                        TokenValue::$token,
+                    )));
+                }};
+            }
             match (c, c2) {
                 ('0'..='9', _) => {
                     return Some(self.take_number().map(|n| {
@@ -557,22 +573,8 @@ impl Iterator for Lexer<'_> {
                         Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
                     }));
                 }
-                ('-', Some('>')) => {
-                    self.offset += 2;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Arrow,
-                    )));
-                }
-                ('.', Some('.')) if chars.next() == Some('.') => {
-                    self.offset += 3;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Ellipsis,
-                    )));
-                }
+                ('-', Some('>')) => token!(2, Arrow),
+                ('.', Some('.')) if chars.next() == Some('.') => token!(3, Ellipsis),
                 ('c', Some('"')) => {
                     self.offset += 1;
                     return Some(self.take_strlit().map(|n| {
@@ -588,150 +590,30 @@ impl Iterator for Lexer<'_> {
                         Token::new(start..self.offset, self.file, TokenValue::from_ident(&n))
                     }));
                 }
-                (':', Some(':')) => {
-                    self.offset += 2;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::PathSep,
-                    )));
-                }
-                (';', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Semicolon,
-                    )));
-                }
-                ('+', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Plus,
-                    )));
-                }
-                ('(', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::LParen,
-                    )));
-                }
-                (')', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::RParen,
-                    )));
-                }
-                ('{', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::LCurly,
-                    )));
-                }
-                ('}', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::RCurly,
-                    )));
-                }
-                ('-', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Minus,
-                    )));
-                }
-                ('*', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Asterisk,
-                    )));
-                }
-                ('/', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Slash,
-                    )));
-                }
-                ('=', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Equal,
-                    )));
-                }
-                ('!', Some('=')) => {
-                    self.offset += 2;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Neq,
-                    )));
-                }
-                ('!', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Not,
-                    )));
-                }
-                ('<', Some('=')) => {
-                    self.offset += 2;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Lte,
-                    )));
-                }
-                ('<', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Lt,
-                    )));
-                }
-                ('>', Some('=')) => {
-                    self.offset += 2;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Gte,
-                    )));
-                }
-                ('>', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Gt,
-                    )));
-                }
-                ('%', _) => {
-                    self.offset += 1;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::Percent,
-                    )));
-                }
+                (':', Some(':')) => token!(2, PathSep),
+                (';', _) => token!(1, Semicolon),
+                ('+', _) => token!(1, Plus),
+                ('(', _) => token!(1, LParen),
+                (')', _) => token!(1, RParen),
+                ('{', _) => token!(1, LCurly),
+                ('}', _) => token!(1, RCurly),
+                ('-', _) => token!(1, Minus),
+                ('*', _) => token!(1, Asterisk),
+                ('/', _) => token!(1, Slash),
+                ('=', _) => token!(1, Equal),
+                ('!', Some('=')) => token!(2, Neq),
+                ('!', _) => token!(1, Not),
+                ('<', Some('=')) => token!(2, Lte),
+                ('<', Some('<')) => token!(2, Shl),
+                ('<', _) => token!(1, Lt),
+                ('>', Some('=')) => token!(2, Gte),
+                ('>', Some('>')) => token!(2, Shr),
+                ('>', _) => token!(1, Gt),
+                ('%', _) => token!(1, Percent),
+                ('&', _) => token!(1, Ampersand),
+                ('|', _) => token!(1, Pipe),
+                ('^', _) => token!(1, Caret),
+                ('~', _) => token!(1, Tilde),
                 ('"', _) => {
                     return Some(self.take_strlit().map(|n| {
                         Token::new(start..self.offset, self.file, TokenValue::StrLit(n))

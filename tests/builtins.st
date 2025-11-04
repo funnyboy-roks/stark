@@ -30,6 +30,59 @@ fn not_test {
     true  blackbox ! c"    true  ! => Expected: false (0), Actual: %d\n" printf(2)
 }
 
+fn and_test {
+    1 2 blackbox & c"    (1 2 &) => Expected: 0, Actual: %d\n" printf(2)
+    1 1 blackbox & c"    (1 1 &) => Expected: 1, Actual: %d\n" printf(2)
+    2 1 blackbox & c"    (2 1 &) => Expected: 0, Actual: %d\n" printf(2)
+    2 3 blackbox & c"    (2 3 &) => Expected: 2, Actual: %d\n" printf(2)
+    3 5 blackbox & c"    (3 5 &) => Expected: 1, Actual: %d\n" printf(2)
+}
+
+fn or_test {
+    1 2 blackbox | c"    (1 2 |) => Expected: 3, Actual: %d\n" printf(2)
+    1 1 blackbox | c"    (1 1 |) => Expected: 1, Actual: %d\n" printf(2)
+    2 1 blackbox | c"    (2 1 |) => Expected: 3, Actual: %d\n" printf(2)
+    2 3 blackbox | c"    (2 3 |) => Expected: 3, Actual: %d\n" printf(2)
+    3 5 blackbox | c"    (3 5 |) => Expected: 7, Actual: %d\n" printf(2)
+}
+
+fn xor_test {
+    1 2 blackbox ^ c"    (1 2 ^) => Expected: 3, Actual: %d\n" printf(2)
+    1 1 blackbox ^ c"    (1 1 ^) => Expected: 0, Actual: %d\n" printf(2)
+    2 1 blackbox ^ c"    (2 1 ^) => Expected: 3, Actual: %d\n" printf(2)
+    2 3 blackbox ^ c"    (2 3 ^) => Expected: 1, Actual: %d\n" printf(2)
+    3 5 blackbox ^ c"    (3 5 ^) => Expected: 6, Actual: %d\n" printf(2)
+}
+
+fn bitnot_test {
+    0xfffffff0 cast(u32) blackbox ~ c"    (0xfffffff0 ~) => Expected: 0x0000000f, Actual: 0x%08x\n" printf(2)
+    0xffffff0f cast(u32) blackbox ~ c"    (0xffffff0f ~) => Expected: 0x000000f0, Actual: 0x%08x\n" printf(2)
+    0xfffff0ff cast(u32) blackbox ~ c"    (0xfffff0ff ~) => Expected: 0x00000f00, Actual: 0x%08x\n" printf(2)
+    0xffff0fff cast(u32) blackbox ~ c"    (0xffff0fff ~) => Expected: 0x0000f000, Actual: 0x%08x\n" printf(2)
+    0xfff0ffff cast(u32) blackbox ~ c"    (0xfff0ffff ~) => Expected: 0x000f0000, Actual: 0x%08x\n" printf(2)
+    0xff0fffff cast(u32) blackbox ~ c"    (0xff0fffff ~) => Expected: 0x00f00000, Actual: 0x%08x\n" printf(2)
+    0xf0ffffff cast(u32) blackbox ~ c"    (0xf0ffffff ~) => Expected: 0x0f000000, Actual: 0x%08x\n" printf(2)
+    0x0fffffff cast(u32) blackbox ~ c"    (0x0fffffff ~) => Expected: 0xf0000000, Actual: 0x%08x\n" printf(2)
+    0x00000000 cast(u32) blackbox ~ c"    (0x00000000 ~) => Expected: 0xffffffff, Actual: 0x%08x\n" printf(2)
+    0xffffffff cast(u32) blackbox ~ c"    (0xffffffff ~) => Expected: 0x00000000, Actual: 0x%08x\n" printf(2)
+    0x55555555 cast(u32) blackbox ~ c"    (0x55555555 ~) => Expected: 0xaaaaaaaa, Actual: 0x%08x\n" printf(2)
+    0xaaaaaaaa cast(u32) blackbox ~ c"    (0xaaaaaaaa ~) => Expected: 0x55555555, Actual: 0x%08x\n" printf(2)
+}
+
+fn shl_test {
+    1 1 blackbox << c"    (1 1 <<) => Expected: 2,   Actual: %d\n" printf(2)
+    1 2 blackbox << c"    (1 2 <<) => Expected: 4,   Actual: %d\n" printf(2)
+    2 2 blackbox << c"    (2 2 <<) => Expected: 8,   Actual: %d\n" printf(2)
+    3 6 blackbox << c"    (3 6 <<) => Expected: 192, Actual: %d\n" printf(2)
+}
+
+fn shr_test {
+    1   1 blackbox >> c"    (1   1 >>) => Expected: 0,   Actual: %d\n" printf(2)
+    2   1 blackbox >> c"    (2   1 >>) => Expected: 1,   Actual: %d\n" printf(2)
+    8   2 blackbox >> c"    (8   2 >>) => Expected: 2,   Actual: %d\n" printf(2)
+    264 1 blackbox >> c"    (264 1 >>) => Expected: 132, Actual: %d\n" printf(2)
+}
+
 fn equal_test {
     1 2 blackbox = c"    (1 2 =) => Expected: 0, Actual: %d\n" printf(2)
     1 1 blackbox = c"    (1 1 =) => Expected: 1, Actual: %d\n" printf(2)
@@ -104,6 +157,12 @@ fn main() {
     c"dup_test\n"             printf dup_test
     c"dup2_test\n"            printf dup2_test
     c"not_test\n"             printf not_test
+    c"and_test\n"             printf and_test
+    c"or_test\n"              printf or_test
+    c"xor_test\n"             printf xor_test
+    c"bitnot_test\n"          printf bitnot_test
+    c"shl_test\n"             printf shl_test
+    c"shr_test\n"             printf shr_test
 
     c"equal_test\n"           printf equal_test
     c"equal_test_float\n"     printf equal_test_float
