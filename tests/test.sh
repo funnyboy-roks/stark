@@ -6,6 +6,14 @@ GREEN='\033[32m'
 RED='\033[31m'
 RESET='\033[0m'
 
+build_stark() {
+    # build in release mode and print the location of the compiled artifact
+    cargo build --release --message-format=json-render-diagnostics \
+        | jq -js '[.[] | select(.reason == "compiler-artifact") | select(.executable != null)] | last | .executable'
+}
+
+bin=$(build_stark)
+
 fail() {
     echo -e $1 >&2
     exit 1
@@ -14,7 +22,7 @@ fail() {
 build() {
     asm="$1.s"
     obj="$1.o"
-    cargo r -q -- "$1.st" -o "$asm"
+    $bin "$1.st" -o "$asm"
     if [ $? -ne 0 ]; then
         return 1
     fi
