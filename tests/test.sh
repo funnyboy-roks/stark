@@ -21,16 +21,15 @@ fail() {
 
 build() {
     asm="$1.s"
-    obj="$1.o"
     $bin "$1.st" -o "$asm"
     if [ $? -ne 0 ]; then
         return 1
     fi
-    fasm "$asm" "$obj"
-    if [ $? -ne 0 ]; then
-        return 1
-    fi
-    gcc -no-pie -o "$1" "$obj"
+    # fasm "$asm" "$obj"
+    # if [ $? -ne 0 ]; then
+    #     return 1
+    # fi
+    gcc -no-pie -o "$1" "$asm"
     if [ $? -ne 0 ]; then
         return 1
     fi

@@ -3,6 +3,7 @@ use std::{
     ffi::CString,
     fmt::Display,
     num::{ParseFloatError, ParseIntError},
+    path::PathBuf,
 };
 
 use miette::Diagnostic;
@@ -181,9 +182,38 @@ impl TokenValue {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    pub file: PathBuf,
+    pub line: u32,
+    pub col: u32,
+}
+
+impl Location {
+    pub fn min(self, other: Self) -> Location {
+        if self < other { self } else { other }
+    }
+}
+
+impl PartialOrd for Location {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.file != other.file {
+            return None;
+        }
+
+        Some((self.line, self.col).cmp(&(other.line, other.col)))
+    }
+}
+
+impl Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}:{}", self.file.display(), self.line, self.col)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
-    pub file: String,
+    pub loc: Location,
     span: Span,
     pub value: TokenValue,
 }
@@ -248,10 +278,10 @@ pub enum LexError {
 }
 
 impl Token {
-    pub fn new(span: impl Into<Span>, file: impl Into<String>, kind: TokenValue) -> Token {
+    pub fn new(span: impl Into<Span>, loc: Location, kind: TokenValue) -> Token {
         Token {
             span: span.into(),
-            file: file.into(),
+            loc,
             value: kind,
         }
     }
@@ -270,6 +300,31 @@ impl<'a> Lexer<'a> {
             content,
             file,
             offset: 0,
+        }
+    }
+
+    fn loc(&self) -> Location {
+        let mut line = 1;
+        let mut col = 0;
+        let mut last_line = 0;
+
+        for (i, b) in self.content.bytes().enumerate() {
+            if b == b'\n' {
+                line += 1;
+                last_line = i;
+                continue;
+            }
+
+            if i == self.offset {
+                col = (i - last_line) as u32;
+                break;
+            }
+        }
+
+        Location {
+            file: self.file.into(),
+            line,
+            col,
         }
     }
 
@@ -542,21 +597,19 @@ impl Iterator for Lexer<'_> {
             let c = chars.next()?;
             let c2 = chars.next();
             let start = self.offset;
+            let loc = self.loc();
             macro_rules! token {
                 ($length: expr, $token: ident) => {{
                     self.offset += $length;
-                    return Some(Ok(Token::new(
-                        start..self.offset,
-                        self.file,
-                        TokenValue::$token,
-                    )));
+                    return Some(Ok(Token::new(start..self.offset, loc, TokenValue::$token)));
                 }};
             }
             match (c, c2) {
                 ('0'..='9', _) => {
-                    return Some(self.take_number().map(|n| {
-                        Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
-                    }));
+                    return Some(
+                        self.take_number()
+                            .map(|n| Token::new(start..self.offset, loc, TokenValue::NumLit(n))),
+                    );
                 }
                 ('/', Some('/')) => {
                     self.offset += 2;
@@ -569,9 +622,10 @@ impl Iterator for Lexer<'_> {
                     };
                 }
                 ('-', Some('0'..='9')) => {
-                    return Some(self.take_number().map(|n| {
-                        Token::new(start..self.offset, self.file, TokenValue::NumLit(n))
-                    }));
+                    return Some(
+                        self.take_number()
+                            .map(|n| Token::new(start..self.offset, loc, TokenValue::NumLit(n))),
+                    );
                 }
                 ('-', Some('>')) => token!(2, Arrow),
                 ('.', Some('.')) if chars.next() == Some('.') => token!(3, Ellipsis),
@@ -580,22 +634,24 @@ impl Iterator for Lexer<'_> {
                     return Some(self.take_strlit().map(|n| {
                         Token::new(
                             start..self.offset,
-                            self.file,
+                            loc,
                             TokenValue::CStrLit(CString::new(n).unwrap()),
                         )
                     }));
                 }
                 ('a'..='z' | 'A'..='Z' | '_', _) => {
-                    return Some(self.take_ident().map(|n| {
-                        Token::new(start..self.offset, self.file, TokenValue::from_ident(&n))
-                    }));
+                    return Some(
+                        self.take_ident().map(|n| {
+                            Token::new(start..self.offset, loc, TokenValue::from_ident(&n))
+                        }),
+                    );
                 }
                 ('#', Some('a'..='z' | 'A'..='Z' | '_')) => {
                     self.offset += 1;
                     return Some(self.take_ident().map(|n| {
                         Token::new(
                             start..self.offset,
-                            self.file,
+                            loc,
                             TokenValue::MacroIdent(n.to_string()),
                         )
                     }));
@@ -603,11 +659,7 @@ impl Iterator for Lexer<'_> {
                 ('$', Some('a'..='z' | 'A'..='Z' | '_')) => {
                     self.offset += 1;
                     return Some(self.take_ident().map(|n| {
-                        Token::new(
-                            start..self.offset,
-                            self.file,
-                            TokenValue::MacroVar(n.to_string()),
-                        )
+                        Token::new(start..self.offset, loc, TokenValue::MacroVar(n.to_string()))
                     }));
                 }
                 (':', Some(':')) => token!(2, PathSep),
@@ -637,9 +689,10 @@ impl Iterator for Lexer<'_> {
                 ('^', _) => token!(1, Caret),
                 ('~', _) => token!(1, Tilde),
                 ('"', _) => {
-                    return Some(self.take_strlit().map(|n| {
-                        Token::new(start..self.offset, self.file, TokenValue::StrLit(n))
-                    }));
+                    return Some(
+                        self.take_strlit()
+                            .map(|n| Token::new(start..self.offset, loc, TokenValue::StrLit(n))),
+                    );
                 }
                 (c, _) => {
                     return Some(Err(LexError::UnexpectedCharacter {

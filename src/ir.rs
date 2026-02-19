@@ -12,7 +12,7 @@ use miette::{Diagnostic, NamedSource};
 use thiserror::Error;
 
 use crate::{
-    lex::{self, Lexer, NumLitVal},
+    lex::{self, Lexer, Location, NumLitVal},
     parse::{
         Ast, AtomKind, Ident, ImportTree, ImportTreeValue, ModuleDeclaration, Parser, Path,
         PathElement, TypeAtom, Visibility,
@@ -1232,7 +1232,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushInt(*a + *b, result_ty.into())))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushInt(*a + *b, result_ty.into()),
+                        ))
                     }
                     Type::F32 | Type::F64 | Type::Float => {
                         let (IrKind::PushFloat(b, _), IrKind::PushFloat(a, _)) =
@@ -1240,7 +1244,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushFloat(*a + *b, result_ty.into())))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushFloat(*a + *b, result_ty.into()),
+                        ))
                     }
                     Type::Pointer(_) | Type::VoidPointer => todo!(),
                     Type::FatPointer => todo!(),
@@ -1275,7 +1283,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushInt(*a * *b, result_ty.into())))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushInt(*a * *b, result_ty.into()),
+                        ))
                     }
                     Type::F32 | Type::F64 | Type::Float => {
                         let (IrKind::PushFloat(b, _), IrKind::PushFloat(a, _)) =
@@ -1283,7 +1295,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushFloat(*a * *b, result_ty.into())))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushFloat(*a * *b, result_ty.into()),
+                        ))
                     }
                     Type::Pointer(_) | Type::VoidPointer => todo!(),
                     Type::FatPointer => todo!(),
@@ -1319,7 +1335,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushBool(*a == *b)))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushBool(*a == *b),
+                        ))
                     }
                     Type::F32 | Type::F64 | Type::Float => {
                         let (IrKind::PushFloat(b, _), IrKind::PushFloat(a, _)) =
@@ -1327,7 +1347,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushBool(*a == *b)))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushBool(*a == *b),
+                        ))
                     }
                     Type::Pointer(_) | Type::VoidPointer => todo!(),
                     Type::FatPointer => todo!(),
@@ -1337,7 +1361,11 @@ impl Builtin {
                         else {
                             panic!("checked by caller")
                         };
-                        ir_stack.push(Ir::new(span, IrKind::PushBool(*a == *b)))
+                        ir_stack.push(Ir::new(
+                            span,
+                            a_ir.loc.min(b_ir.loc),
+                            IrKind::PushBool(*a == *b),
+                        ))
                     }
                 };
                 Ok(())
@@ -1347,7 +1375,11 @@ impl Builtin {
                 let IrKind::PushBool(b) = b_ir.kind else {
                     panic!("checked by caller")
                 };
-                ir_stack.push(Ir::new(current.span + b_ir.span, IrKind::PushBool(!b)));
+                ir_stack.push(Ir::new(
+                    current.span + b_ir.span,
+                    current.loc.min(b_ir.loc),
+                    IrKind::PushBool(!b),
+                ));
                 Ok(())
             }
             Builtin::NotEqual => todo!(),
@@ -1398,6 +1430,7 @@ impl Builtin {
                         };
                         ir_stack.push(Ir::new(
                             span,
+                            a_ir.loc.min(b_ir.loc),
                             IrKind::PushInt(
                                 match self {
                                     Builtin::And => *a & *b,
@@ -1420,6 +1453,7 @@ impl Builtin {
                         };
                         ir_stack.push(Ir::new(
                             span,
+                            a_ir.loc.min(b_ir.loc),
                             IrKind::PushBool(match self {
                                 Builtin::And => *a && *b,
                                 Builtin::Or => *a || *b,
@@ -1437,7 +1471,11 @@ impl Builtin {
                 let IrKind::PushInt(b, kind) = b_ir.kind else {
                     panic!("checked by caller")
                 };
-                ir_stack.push(Ir::new(current.span + b_ir.span, IrKind::PushInt(!b, kind)));
+                ir_stack.push(Ir::new(
+                    current.span + b_ir.span,
+                    current.loc.min(b_ir.loc),
+                    IrKind::PushInt(!b, kind),
+                ));
                 Ok(())
             }
             Builtin::Shl | Builtin::Shr => {
@@ -1466,6 +1504,7 @@ impl Builtin {
                         };
                         ir_stack.push(Ir::new(
                             span,
+                            a_ir.loc.min(b_ir.loc),
                             IrKind::PushInt(
                                 match self {
                                     Builtin::Shl => *a << *b,
@@ -1525,13 +1564,18 @@ impl Cast {
             IrKind::PushInt(n, _) => {
                 if self.target.is_integer() {
                     let n = n & ((1 << (8 * self.target.size())) - 1);
-                    ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n, (&self.target).into())));
+                    ir_stack.push(Ir::new(
+                        ir.span,
+                        ir.loc,
+                        IrKind::PushInt(n, (&self.target).into()),
+                    ));
                 } else if self.target == Type::Bool {
-                    ir_stack.push(Ir::new(ir.span, IrKind::PushBool(n != 0)));
+                    ir_stack.push(Ir::new(ir.span, ir.loc, IrKind::PushBool(n != 0)));
                 } else if self.target.is_float() {
                     let f = n as f64;
                     ir_stack.push(Ir::new(
                         ir.span,
+                        ir.loc,
                         IrKind::PushFloat(f, (&self.target).into()),
                     ));
                 } else {
@@ -1541,10 +1585,15 @@ impl Cast {
             IrKind::PushFloat(f, _) => {
                 if self.target.is_integer() {
                     let n = f as i128 & ((1 << (8 * self.target.size())) - 1);
-                    ir_stack.push(Ir::new(ir.span, IrKind::PushInt(n, (&self.target).into())));
+                    ir_stack.push(Ir::new(
+                        ir.span,
+                        ir.loc,
+                        IrKind::PushInt(n, (&self.target).into()),
+                    ));
                 } else if self.target.is_float() {
                     ir_stack.push(Ir::new(
                         ir.span,
+                        ir.loc,
                         IrKind::PushFloat(f, (&self.target).into()),
                     ));
                 } else {
@@ -1572,7 +1621,7 @@ impl Cast {
                     Type::Struct => todo!(),
                     Type::Bool => IrKind::PushBool(b),
                 };
-                ir_stack.push(Ir::new(ir.span, kind));
+                ir_stack.push(Ir::new(ir.span, ir.loc, kind));
             }
             IrKind::PushCStr(_) => todo!(),
             IrKind::PushStr(_) => todo!(),
@@ -1635,12 +1684,13 @@ impl IrKind {
 #[derive(Debug, Clone)]
 pub struct Ir {
     pub span: Span,
+    pub loc: Location,
     pub kind: IrKind,
 }
 
 impl Ir {
-    fn new(span: Span, kind: IrKind) -> Self {
-        Self { span, kind }
+    fn new(span: Span, loc: Location, kind: IrKind) -> Self {
+        Self { span, loc, kind }
     }
 }
 
@@ -1650,6 +1700,7 @@ pub struct ConvertedFunction {
     pub name: String,
     pub linker_name: String,
     pub body: Vec<Ir>,
+    pub curly_loc: (Location, Location),
 }
 
 #[derive(Debug, Clone)]
@@ -1856,6 +1907,7 @@ pub struct Module {
     pub imports: HashMap<String, Path>,
     pub functions: HashMap<String, FunctionSignature>,
     pub converted_functions: Vec<ConvertedFunction>,
+    pub files: HashMap<PathBuf, usize>,
 }
 
 impl Module {
@@ -1871,12 +1923,13 @@ impl Module {
             quiet,
             root: None,
             path,
-            filepath,
+            filepath: filepath.clone(),
             content,
             submodules: Default::default(),
             imports: Default::default(),
             functions: Default::default(),
             converted_functions: Default::default(),
+            files: HashMap::from_iter([(filepath, 0)]),
         }
     }
 
@@ -1898,6 +1951,7 @@ impl Module {
             imports: self.imports.clone(),
             functions: self.functions.clone(),
             converted_functions: Vec::new(),
+            files: self.files.clone(),
         }
     }
 
@@ -1908,6 +1962,15 @@ impl Module {
             .map(|x| &**x)
             .chain(lex::KW_MAP.keys().copied())
             .collect()
+    }
+
+    pub fn file_no(&self, file: impl AsRef<std::path::Path>) -> Option<usize> {
+        self.root
+            .as_deref()
+            .unwrap_or(self)
+            .files
+            .get(file.as_ref())
+            .copied()
     }
 
     fn resolve_ident_rec(
@@ -2041,7 +2104,7 @@ impl Module {
         &self,
         module: &ModuleDeclaration,
         errors: &mut Vec<IrGenError>,
-    ) -> Result<Module, ()> {
+    ) -> Result<(PathBuf, Module), ()> {
         // TODO: handle cyclic dependency
         let paths = [
             // foo.st
@@ -2094,7 +2157,8 @@ impl Module {
         new_path.push(module.name.clone());
         let mut module = Module::new(ast, new_path, path.clone(), content, self.quiet);
         module.scan_functions(errors)?;
-        Ok(module)
+
+        Ok((path.clone(), module))
     }
 
     pub fn scan_functions(&mut self, errors: &mut Vec<IrGenError>) -> Result<(), ()> {
@@ -2181,7 +2245,14 @@ impl Module {
                 }
                 Ast::ModuleDeclaration(module) => {
                     // TODO: better file resolution
-                    let parsed = self.parse_module(module, errors)?;
+                    let (path, mut parsed) = self.parse_module(module, errors)?;
+                    self.files.insert(path, self.files.len());
+
+                    for (path, _) in parsed.files.drain() {
+                        let len = self.files.len();
+                        self.files.entry(path).or_insert(len);
+                    }
+
                     self.submodules
                         .insert(module.name.clone(), (parsed, module.visibility));
                 }
@@ -2253,9 +2324,9 @@ impl Module {
         ast: Ast,
     ) -> Result<(), IrGenError> {
         macro_rules! simple {
-            ($span: expr, $type: expr, $kind: expr) => {{
+            ($span: expr, $loc: expr, $type: expr, $kind: expr) => {{
                 type_stack.push($type);
-                out.push(Ir::new($span, $kind));
+                out.push(Ir::new($span, $loc, $kind));
             }};
         }
         macro_rules! builtin {
@@ -2267,6 +2338,7 @@ impl Module {
                 type_stack.extend_from_slice(&returns);
                 out.push(Ir::new(
                     $atom.token.span(),
+                    $atom.token.loc,
                     IrKind::CallBuiltin(Builtin::$builtin),
                 ));
             }};
@@ -2285,13 +2357,18 @@ impl Module {
                         });
                     }
                 }
-                out.push(Ir::new(ident.span(), IrKind::CallFn(ident)));
+                out.push(Ir::new(
+                    ident.span(),
+                    ident.loc.clone(),
+                    IrKind::CallFn(ident),
+                ));
             }
             Ast::Atom(atom) => match atom.kind {
                 AtomKind::NumLit(num_lit) => match num_lit.value {
                     NumLitVal::Integer(n) => {
                         simple!(
                             atom.token.span(),
+                            atom.token.loc,
                             ty!(Integer),
                             IrKind::PushInt(n, IntLitType::Unresolved)
                         )
@@ -2299,16 +2376,32 @@ impl Module {
                     NumLitVal::Float(f) => {
                         simple!(
                             atom.token.span(),
+                            atom.token.loc,
                             ty!(Float),
                             IrKind::PushFloat(f, FloatLitType::Unresolved)
                         )
                     }
                 },
-                AtomKind::BoolLit(b) => simple!(atom.token.span(), ty!(bool), IrKind::PushBool(b)),
+                AtomKind::BoolLit(b) => simple!(
+                    atom.token.span(),
+                    atom.token.loc,
+                    ty!(bool),
+                    IrKind::PushBool(b)
+                ),
                 AtomKind::StrLit(s) => {
-                    simple!(atom.token.span(), Type::FatPointer, IrKind::PushStr(s));
+                    simple!(
+                        atom.token.span(),
+                        atom.token.loc,
+                        Type::FatPointer,
+                        IrKind::PushStr(s)
+                    );
                 }
-                AtomKind::CStrLit(s) => simple!(atom.token.span(), ty!(*i8), IrKind::PushCStr(s)),
+                AtomKind::CStrLit(s) => simple!(
+                    atom.token.span(),
+                    atom.token.loc,
+                    ty!(*i8),
+                    IrKind::PushCStr(s)
+                ),
                 AtomKind::Type(_) => todo!(),
                 AtomKind::Plus => builtin!(atom, Add),
                 AtomKind::Minus => builtin!(atom, Sub),
@@ -2341,7 +2434,11 @@ impl Module {
                                 after: type_stack.clone(),
                             });
                         }
-                        out.push(Ir::new(atom.token.span(), IrKind::Break(loop_id.clone())));
+                        out.push(Ir::new(
+                            atom.token.span(),
+                            atom.token.loc,
+                            IrKind::Break(loop_id.clone()),
+                        ));
                     } else {
                         todo!("Break not in a loop")
                     }
@@ -2417,6 +2514,7 @@ impl Module {
 
                 out.push(Ir::new(
                     t.then_token.span(),
+                    t.then_token.loc.clone(),
                     IrKind::Then(ThenIr {
                         then_span: t.then_token.span(),
                         body,
@@ -2467,6 +2565,7 @@ impl Module {
 
                 out.push(Ir::new(
                     span,
+                    w.while_token.loc,
                     IrKind::While(WhileIr {
                         loop_id,
                         condition,
@@ -2482,7 +2581,7 @@ impl Module {
                     span: c.span(),
                 };
                 x.type_check(type_stack)?;
-                out.push(Ir::new(c.span(), IrKind::Cast(x)));
+                out.push(Ir::new(c.span(), c.loc, IrKind::Cast(x)));
             }
             Ast::Dup(d) => {
                 let (consumed, returns) = Builtin::Dup(d.count).type_check(d.span(), type_stack)?;
@@ -2491,6 +2590,7 @@ impl Module {
                 type_stack.extend_from_slice(&returns);
                 out.push(Ir::new(
                     d.span(),
+                    d.loc,
                     IrKind::CallBuiltin(Builtin::Dup(d.count)),
                 ));
             }
@@ -2522,12 +2622,18 @@ impl Module {
                         Vec::new()
                     }
                 };
-                assert!(optimised_type_stack.matches(&body_type_stack));
+                debug_assert!(
+                    optimised_type_stack.matches(&body_type_stack),
+                    "opt != og.  opt = {:?}, og = {:?}",
+                    optimised_type_stack,
+                    body_type_stack
+                );
 
                 let converted = ConvertedFunction {
                     name: f.name.clone(),
                     linker_name: f.name, // TODO: user-defined linker symbols
                     body: ir,
+                    curly_loc: f.curly_loc,
                 };
                 self.converted_functions.push(converted);
                 if !body_type_stack.matches(&signature.returns) {

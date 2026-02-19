@@ -146,7 +146,7 @@ fn main2(cli: &Cli, content: String, errors: &mut Vec<miette::Error>) -> Result<
             for x in &module.converted_functions {
                 eprintln!("{1:>0$}    {2}:", indent * 4, "", x.linker_name);
                 for y in &x.body {
-                    eprintln!("{1:>0$}        {2:?}", indent * 4, "", y.kind);
+                    eprintln!("{1:>0$}        ({2}) {3:?}", indent * 4, "", y.loc, y.kind);
                 }
             }
             eprintln!("{1:>0$}Submodules:", indent * 4, "");

@@ -10,7 +10,7 @@ use phf::phf_map;
 use thiserror::Error;
 
 use crate::{
-    lex::{LexError, Lexer, NumLit, NumLitVal, Token, TokenKind, TokenValue},
+    lex::{LexError, Lexer, Location, NumLit, NumLitVal, Token, TokenKind, TokenValue},
     span::{Span, Spanned},
 };
 
@@ -96,6 +96,7 @@ pub struct Ident {
     pub path: Path,
     pub arity: Option<u32>,
     span: Span,
+    pub loc: Location,
 }
 
 impl Spanned for Ident {
@@ -227,6 +228,7 @@ pub struct Fn {
     pub returns: Vec<TypeAtom>,
     pub body: Vec<Ast>,
     span: Span,
+    pub curly_loc: (Location, Location),
 }
 
 impl Spanned for Fn {
@@ -362,6 +364,11 @@ pub struct Cast {
     span: Span,
     /// ```stark
     /// ... cast(*u8) ...
+    ///     ^
+    /// ```
+    pub loc: Location,
+    /// ```stark
+    /// ... cast(*u8) ...
     ///          ^^^
     /// ```
     pub target_span: Span,
@@ -389,6 +396,11 @@ pub struct Dup {
     ///     ^^^^^^^^
     /// ```
     span: Span,
+    /// ```stark
+    /// ... dup(*u8) ...
+    ///     ^
+    /// ```
+    pub loc: Location,
     /// ```stark
     /// ... dup(2) ...
     ///         ^
@@ -946,6 +958,7 @@ impl<'a> Parser<'a> {
     }
 
     fn take_ident(&mut self, taken: Token) -> Result<Ident, Vec<ParseError>> {
+        let loc = taken.loc.clone();
         let path = self.take_path(taken)?;
 
         let (arity, span) = if let Some((arity, span)) = self.take_arity()? {
@@ -954,7 +967,12 @@ impl<'a> Parser<'a> {
             (None, path.span())
         };
 
-        Ok(Ident { path, arity, span })
+        Ok(Ident {
+            path,
+            arity,
+            span,
+            loc,
+        })
     }
 
     fn take_import_tree(&mut self) -> Result<ImportTree, Vec<ParseError>> {
@@ -1072,6 +1090,7 @@ impl<'a> Parser<'a> {
             returns,
             body,
             span,
+            curly_loc: (body_open.loc, r_curly.loc),
         })
     }
 
@@ -1082,6 +1101,7 @@ impl<'a> Parser<'a> {
 
         Ok(Cast {
             span: cast_token.span() + group_start.span() + group_end.span(),
+            loc: cast_token.loc,
             target_span,
             target,
         })
@@ -1337,7 +1357,11 @@ impl<'a> Parser<'a> {
                             (1, token.span())
                         };
 
-                        out.push(Ast::Dup(Dup { span, count }));
+                        out.push(Ast::Dup(Dup {
+                            span,
+                            loc: token.loc,
+                            count,
+                        }));
                     }
                     TokenValue::Then => {
                         let t = self.take_then(token)?;

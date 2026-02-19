@@ -65,28 +65,28 @@ impl Register {
         macro_rules! registers {
             (N = $c: literal) => {
                 match size {
-                    1 => concat!("r", $c, "b"),
-                    2 => concat!("r", $c, "w"),
-                    4 => concat!("r", $c, "d"),
-                    8 => concat!("r", $c),
+                    1 => concat!("%r", $c, "b"),
+                    2 => concat!("%r", $c, "w"),
+                    4 => concat!("%r", $c, "d"),
+                    8 => concat!("%r", $c),
                     _ => panic!("invalid size: {}", size),
                 }
             };
             ($c: literal) => {
                 match size {
-                    1 => concat!($c, "l"),
-                    2 => concat!($c, "x"),
-                    4 => concat!("e", $c, "x"),
-                    8 => concat!("r", $c, "x"),
+                    1 => concat!("%", $c, "l"),
+                    2 => concat!("%", $c, "x"),
+                    4 => concat!("%", "e", $c, "x"),
+                    8 => concat!("%", "r", $c, "x"),
                     _ => panic!("invalid size: {}", size),
                 }
             };
             ($qword: literal, $dword: literal, $word: literal, $byte: literal) => {
                 match size {
-                    1 => $byte,
-                    2 => $word,
-                    4 => $dword,
-                    8 => $qword,
+                    1 => concat!("%", $byte),
+                    2 => concat!("%", $word),
+                    4 => concat!("%", $dword),
+                    8 => concat!("%", $qword),
                     _ => panic!("invalid size: {}", size),
                 }
             };
@@ -141,14 +141,14 @@ impl FloatRegister {
 impl Display for FloatRegister {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FloatRegister::Xmm0 => write!(f, "xmm0"),
-            FloatRegister::Xmm1 => write!(f, "xmm1"),
-            FloatRegister::Xmm2 => write!(f, "xmm2"),
-            FloatRegister::Xmm3 => write!(f, "xmm3"),
-            FloatRegister::Xmm4 => write!(f, "xmm4"),
-            FloatRegister::Xmm5 => write!(f, "xmm5"),
-            FloatRegister::Xmm6 => write!(f, "xmm6"),
-            FloatRegister::Xmm7 => write!(f, "xmm7"),
+            FloatRegister::Xmm0 => write!(f, "%xmm0"),
+            FloatRegister::Xmm1 => write!(f, "%xmm1"),
+            FloatRegister::Xmm2 => write!(f, "%xmm2"),
+            FloatRegister::Xmm3 => write!(f, "%xmm3"),
+            FloatRegister::Xmm4 => write!(f, "%xmm4"),
+            FloatRegister::Xmm5 => write!(f, "%xmm5"),
+            FloatRegister::Xmm6 => write!(f, "%xmm6"),
+            FloatRegister::Xmm7 => write!(f, "%xmm7"),
         }
     }
 }
@@ -192,14 +192,20 @@ impl Type {
         }
 
         writeln!(writer, "    popq {}", register.for_size(8))?;
-        if self.size() < target.size() {
-            writeln!(
-                writer,
-                "    {} {}, {}",
-                if target.is_signed() { "movsx" } else { "movzx" },
-                register.for_size(8),
-                register.for_size(self.size())
-            )?;
+        match (self.size(), target.size()) {
+            (8, 4) | (4, 8) => {
+                // top bits of rax are cleared when eax is set
+            }
+            (s, t) if s > t => {
+                writeln!(
+                    writer,
+                    "    {} {}, {}",
+                    if target.is_signed() { "movsx" } else { "movzx" },
+                    register.for_size(target.size()),
+                    register.for_size(self.size())
+                )?;
+            }
+            _ => {}
         }
 
         Ok(())
@@ -223,7 +229,7 @@ impl DataItems {
             self.bytes.insert(s.into_boxed_slice(), next);
             next
         };
-        format!("bytes_{}", n)
+        format!("$.bytes_{}", n)
     }
 
     pub fn add_f32(&mut self, float: f32) -> String {
@@ -232,19 +238,20 @@ impl DataItems {
             .floats
             .entry(((float as f64).into(), false))
             .or_insert(len);
-        format!("float_{}", n)
+        format!("$.float_{}", n)
     }
 
     pub fn add_f64(&mut self, float: f64) -> String {
         let len = self.floats.len();
         let n = self.floats.entry((float.into(), true)).or_insert(len);
-        format!("float_{}", n)
+        format!("$.float_{}", n)
     }
 
     pub fn write(&self, mut out: impl Write) -> Result<(), CodeGenError> {
+        writeln!(out, "    .section .rodata")?;
         for (s, n) in &self.bytes {
-            writeln!(out, "bytes_{}: ; {:?}", n, String::from_utf8_lossy(s))?;
-            write!(out, "    db ")?;
+            writeln!(out, ".bytes_{}: # {:?}", n, String::from_utf8_lossy(s))?;
+            write!(out, "    .byte ")?;
             for (i, c) in s.iter().enumerate() {
                 if i > 0 {
                     write!(out, ", ")?;
@@ -254,12 +261,12 @@ impl DataItems {
             writeln!(out)?;
         }
 
-        for ((f, double_precision), n) in &self.floats {
-            writeln!(out, "float_{}:", n)?;
-            if *double_precision {
-                writeln!(out, "    dq {:?}", **f)?;
+        for (&(f, double_precision), &n) in &self.floats {
+            writeln!(out, ".float_{}:", n)?;
+            if double_precision {
+                writeln!(out, "    .double {:?}", *f)?;
             } else {
-                writeln!(out, "    dd {:?}", **f)?;
+                writeln!(out, "    .float {:?}", *f)?;
             }
         }
         Ok(())
@@ -268,7 +275,7 @@ impl DataItems {
 
 impl Type {
     pub fn drop<W: Write>(&self, writer: &mut W) -> Result<(), CodeGenError> {
-        writeln!(writer, "    add rsp, {}", self.padded_size())?;
+        writeln!(writer, "    add ${}, %rsp", self.padded_size())?;
         Ok(())
     }
 }
@@ -294,36 +301,36 @@ impl Builtin {
                         if size == 4 {
                             if infer_one {
                                 if infer_bottom {
-                                    writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                                    writeln!(writer, "    cvtsd2ss {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                    writeln!(writer, "    movss (%rsp), {}", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    cvtsd2ss +8(%rsp), {}", FloatRegister::Xmm1)?;
                                 } else {
-                                    writeln!(writer, "    cvtsd2ss {}, [rsp]", FloatRegister::Xmm0)?;
-                                    writeln!(writer, "    movss {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                    writeln!(writer, "    cvtsd2ss (%rsp), {}", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    movss +8(%rsp), {}", FloatRegister::Xmm1)?;
                                 }
                             }
-                            writeln!(writer, "    add rsp, 16")?;
+                            writeln!(writer, "    addq $16, %rsp")?;
                             writeln!(
                                 writer,
                                 "    comiss {}, {}",
-                                compare!(@f $first),
                                 compare!(@f $second),
+                                compare!(@f $first),
                             )?;
                         } else if size == 8 {
                             if infer_one {
                                 if infer_bottom {
-                                    writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
-                                    writeln!(writer, "    movsd {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                    writeln!(writer, "    movsd (%rsp), {}", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    movsd +8(%rsp), {}", FloatRegister::Xmm1)?;
                                 } else {
-                                    writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
-                                    writeln!(writer, "    movsd {}, [rsp+8]", FloatRegister::Xmm1)?;
+                                    writeln!(writer, "    movsd (%rsp), {}", FloatRegister::Xmm0)?;
+                                    writeln!(writer, "    movsd +8(%rsp), {}", FloatRegister::Xmm1)?;
                                 }
                             }
-                            writeln!(writer, "    add rsp, 16")?;
+                            writeln!(writer, "    addq $16, %rsp")?;
                             writeln!(
                                 writer,
                                 "    comisd {}, {}",
-                                compare!(@f $first),
                                 compare!(@f $second),
+                                compare!(@f $first),
                             )?;
                         }
                     } else {
@@ -332,15 +339,15 @@ impl Builtin {
                 } else {
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
                     assert_eq!(type_stack[len - 2].padded_size(), 8);
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    popq rbx")?;
-                    writeln!(writer, "    cmp {}, {}", compare!(@n $first), compare!(@n $second))?;
+                    writeln!(writer, "    popq %rax")?;
+                    writeln!(writer, "    popq %rbx")?;
+                    writeln!(writer, "    cmp {}, {}", compare!(@n $second), compare!(@n $first))?;
                 }
             };
             (@f a) => { FloatRegister::Xmm0 };
             (@f b) => { FloatRegister::Xmm1 };
-            (@n a) => { "rax" };
-            (@n b) => { "rbx" };
+            (@n a) => { "%rax" };
+            (@n b) => { "%rbx" };
         }
         match self {
             Builtin::Add => {
@@ -354,10 +361,10 @@ impl Builtin {
                     //     addss xmm1, xmm0
                     //     sub rsp, 8
                     //     movss [rsp], xmm1
-                    writeln!(writer, "    movss xmm0, [rsp]")?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(writer, "    addss xmm0, [rsp]")?;
-                    writeln!(writer, "    movss [rsp], xmm0")?;
+                    writeln!(writer, "    movss (%rsp), %xmm0")?;
+                    writeln!(writer, "    addq $8, %rsp")?;
+                    writeln!(writer, "    addss (%rsp), %xmm0")?;
+                    writeln!(writer, "    movss %xmm0, (%rsp)")?;
                 } else {
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
                     assert_eq!(type_stack[len - 2].padded_size(), 8);
@@ -371,25 +378,25 @@ impl Builtin {
                         assert_eq!(x.size().count_ones(), 1, "x.size() is a power of two");
                         let n = x.size().trailing_zeros();
                         assert!(2u32.pow(n) == x.size());
-                        writeln!(writer, "    popq rbx")?;
-                        writeln!(writer, "    popq rax")?;
-                        writeln!(writer, "    pushq rbx")?;
+                        writeln!(writer, "    popq %rbx")?;
+                        writeln!(writer, "    popq %rax")?;
+                        writeln!(writer, "    pushq %rbx")?;
                         n
                     } else if let Type::Pointer(x) = &type_stack[len - 2] {
                         assert_eq!(x.size().count_ones(), 1, "x.size() is a power of two");
                         let n = x.size().trailing_zeros();
                         assert!(2u32.pow(n) == x.size());
-                        writeln!(writer, "    popq rax")?;
+                        writeln!(writer, "    popq %rax")?;
                         n
                     } else {
-                        writeln!(writer, "    popq rax")?;
+                        writeln!(writer, "    popq %rax")?;
                         0
                     };
 
                     if n != 0 {
-                        writeln!(writer, "    shl rax, {}", n)?;
+                        writeln!(writer, "    shl ${}, rax", n)?;
                     }
-                    writeln!(writer, "    add [rsp], rax")?;
+                    writeln!(writer, "    addq %rax, (%rsp)")?;
                 }
             }
             Builtin::Sub => {
@@ -403,16 +410,16 @@ impl Builtin {
                     //     subss xmm1, xmm0
                     //     sub rsp, 8
                     //     movss [rsp], xmm1
-                    writeln!(writer, "    movss xmm1, [rsp+8]")?;
-                    writeln!(writer, "    subss xmm1, [rsp]")?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(writer, "    movss [rsp], xmm1")?;
+                    writeln!(writer, "    movss +8(%rsp), %xmm1")?;
+                    writeln!(writer, "    subss (%rsp), %xmm1")?;
+                    writeln!(writer, "    addq $8, %rsp")?;
+                    writeln!(writer, "    movss %xmm1, (%rsp)")?;
                 } else {
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
                     assert_eq!(type_stack[len - 2].padded_size(), 8);
                     assert!(type_stack[len - 1].is_integer());
-                    writeln!(writer, "    popq rax")?;
-                    writeln!(writer, "    sub [rsp], rax")?;
+                    writeln!(writer, "    popq %rax")?;
+                    writeln!(writer, "    subq %rax, (%rsp)")?;
                 }
             }
             Builtin::Mul => {
@@ -431,10 +438,10 @@ impl Builtin {
                     // writeln!(writer, "    mulss xmm1, [rsp]")?;
                     // writeln!(writer, "    add rsp, 8")?;
                     // writeln!(writer, "    movss [rsp], xmm1")?;
-                    writeln!(writer, "    movss xmm0, [rsp]")?;
-                    writeln!(writer, "    add rsp, 8")?;
-                    writeln!(writer, "    mulss xmm0, [rsp]")?;
-                    writeln!(writer, "    movss [rsp], xmm0")?;
+                    writeln!(writer, "    movss (%rsp), %xmm0")?;
+                    writeln!(writer, "    addq $8, %rsp")?;
+                    writeln!(writer, "    mulss (%rsp), %xmm0")?;
+                    writeln!(writer, "    movss %xmm0, (%rsp)")?;
                 } else {
                     assert_eq!(type_stack[len - 1].padded_size(), 8);
                     assert_eq!(type_stack[len - 2].padded_size(), 8);
@@ -447,7 +454,7 @@ impl Builtin {
                         if ty.is_signed() { "imul" } else { "mul" },
                         Register::Rbx.for_size(ty.size())
                     )?;
-                    writeln!(writer, "    push {}", Register::Rax.for_size(ty.size()))?;
+                    writeln!(writer, "    pushq {}", Register::Rax.for_size(ty.size()))?;
                 }
             }
             Builtin::Div => {
@@ -472,7 +479,7 @@ impl Builtin {
                         Register::Rbx.for_size(ty.size())
                     )?;
                     // rdx is the quotent
-                    writeln!(writer, "    push {}", Register::Rax.for_size(ty.size()))?;
+                    writeln!(writer, "    pushq {}", Register::Rax.for_size(ty.size()))?;
                 }
             }
             Builtin::Mod => {
@@ -497,7 +504,7 @@ impl Builtin {
                         Register::Rbx.for_size(ty.size())
                     )?;
                     // rdx is the remainder
-                    writeln!(writer, "    push {}", Register::Rdx.for_size(ty.size()))?;
+                    writeln!(writer, "    pushq {}", Register::Rdx.for_size(ty.size()))?;
                 }
             }
             Builtin::And => {
@@ -505,36 +512,36 @@ impl Builtin {
                 assert!(type_stack[len - 2].is_integer() || type_stack[len - 2] == ty!(bool));
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
-                writeln!(writer, "    popq {}", Register::Rax.for_size(8))?;
-                writeln!(writer, "    and qword [rsp], {}", Register::Rax.for_size(8))?;
+                writeln!(writer, "    popq %rax")?;
+                writeln!(writer, "    andq %rax, (%rsp)")?;
             }
             Builtin::Or => {
                 assert!(type_stack[len - 1].is_integer() || type_stack[len - 1] == ty!(bool));
                 assert!(type_stack[len - 2].is_integer() || type_stack[len - 2] == ty!(bool));
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
-                writeln!(writer, "    popq {}", Register::Rax.for_size(8))?;
-                writeln!(writer, "    or qword [rsp], {}", Register::Rax.for_size(8))?;
+                writeln!(writer, "    popq %rax")?;
+                writeln!(writer, "    orq %rax, (%rsp)")?;
             }
             Builtin::Xor => {
                 assert!(type_stack[len - 1].is_integer() || type_stack[len - 1] == ty!(bool));
                 assert!(type_stack[len - 2].is_integer() || type_stack[len - 2] == ty!(bool));
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
-                writeln!(writer, "    popq {}", Register::Rax.for_size(8))?;
-                writeln!(writer, "    xor qword [rsp], {}", Register::Rax.for_size(8))?;
+                writeln!(writer, "    popq %rax")?;
+                writeln!(writer, "    xorq %rax, (%rsp)")?;
             }
             Builtin::BitNot => {
                 assert!(type_stack[len - 1].is_integer());
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
                 writeln!(
                     writer,
-                    "    not {} [rsp]",
+                    "    {} (%rsp)",
                     match type_stack[len - 1].size() {
-                        1 => "byte",
-                        2 => "word",
-                        4 => "dword",
-                        8 => "qword",
+                        1 => "notb",
+                        2 => "notw",
+                        4 => "notl",
+                        8 => "notq",
                         _ => unreachable!(),
                     }
                 )?;
@@ -550,8 +557,8 @@ impl Builtin {
                 writeln!(
                     writer,
                     "    shl {}, {}",
+                    Register::Rcx.for_size(1),
                     Register::Rax.for_size(ty.size()),
-                    Register::Rcx.for_size(1)
                 )?;
                 writeln!(writer, "    pushq {}", Register::Rax.for_size(ty.size()))?;
             }
@@ -566,53 +573,53 @@ impl Builtin {
                 writeln!(
                     writer,
                     "    shr {}, {}",
+                    Register::Rcx.for_size(1),
                     Register::Rax.for_size(ty.size()),
-                    Register::Rcx.for_size(1)
                 )?;
                 writeln!(writer, "    pushq {}", Register::Rax.for_size(ty.size()))?;
             }
             Builtin::Equal => {
                 compare!(a, b);
-                writeln!(writer, "    sete al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    sete %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Not => {
-                writeln!(writer, "    popq rax")?;
-                writeln!(writer, "    cmp rax, 0")?;
-                writeln!(writer, "    sete al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    popq %rax")?;
+                writeln!(writer, "    cmp $0, %rax")?;
+                writeln!(writer, "    sete %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::NotEqual => {
                 compare!(a, b);
-                writeln!(writer, "    setne al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    setne %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Lt => {
                 compare!(a, b);
-                writeln!(writer, "    seta al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    seta %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Lte => {
                 compare!(a, b);
-                writeln!(writer, "    setnb al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    setnb %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Gt => {
                 compare!(b, a);
-                writeln!(writer, "    seta al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    seta %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Gte => {
                 compare!(b, a);
-                writeln!(writer, "    setnb al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    push rax")?;
+                writeln!(writer, "    setnb %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Dup(n) => {
                 assert!(type_stack.len() >= n as _);
@@ -622,6 +629,7 @@ impl Builtin {
                     .take(n as _)
                     .map(|t| t.padded_size())
                     .sum();
+                // TODO: these instructions might not be correct after moving to GAS
                 // Attempt to reduce operations by using bigger mnemonics
                 let (inst, count) = if length % 8 == 0 {
                     ("movsq", length / 8)
@@ -633,20 +641,20 @@ impl Builtin {
                     ("movsb", length)
                 };
 
-                writeln!(writer, "    mov rsi, rsp")?; // src = rsp
-                writeln!(writer, "    sub rsp, {}", length)?; // rsp -= length
-                writeln!(writer, "    mov rdi, rsp")?; // dst = rsp
-                writeln!(writer, "    mov rcx, {}", count)?;
+                writeln!(writer, "    movq %rsp, %rsi")?; // src = rsp
+                writeln!(writer, "    subq ${}, %rsp", length)?; // rsp -= length
+                writeln!(writer, "    movq %rsp, %rdi")?; // dst = rsp
+                writeln!(writer, "    movq ${}, %rcx", count)?;
                 writeln!(writer, "    rep {}", inst)?;
             }
             Builtin::Swap => {
                 // TODO: move values bigger than registers
                 assert_eq!(type_stack[len - 2].padded_size(), 8);
                 assert_eq!(type_stack[len - 1].padded_size(), 8);
-                writeln!(writer, "    popq rax")?;
-                writeln!(writer, "    popq rbx")?;
-                writeln!(writer, "    push rax")?;
-                writeln!(writer, "    push rbx")?;
+                writeln!(writer, "    popq %rax")?;
+                writeln!(writer, "    popq %rbx")?;
+                writeln!(writer, "    push %rax")?;
+                writeln!(writer, "    push %rbx")?;
             }
             Builtin::Drop => {
                 let ty = type_stack.last().unwrap();
@@ -657,18 +665,18 @@ impl Builtin {
                 let Type::Pointer(inner) = ty else {
                     panic!("ty is pointer");
                 };
-                writeln!(writer, "    popq rax")?;
-                let (inst, mnemonic) = match inner.size() {
-                    1 if inner.is_signed() => ("movsx", "byte"),
-                    1 => ("movzx", "byte"),
-                    2 if inner.is_signed() => ("movsx", "word"),
-                    2 => ("movzx", "word"),
-                    4 => ("mov", "dword"),
-                    8 => ("mov", "qword"),
+                writeln!(writer, "    popq %rax")?;
+                let (inst, reg) = match inner.size() {
+                    1 if inner.is_signed() => ("movsbl", "eax"),
+                    1 => ("movzbl", "eax"),
+                    2 if inner.is_signed() => ("movsbw", "eax"),
+                    2 => ("movzbw", "eax"),
+                    4 => ("movw", "eax"),
+                    8 => ("movq", "rax"),
                     _ => todo!("arbitrary pointer inner size"),
                 };
-                writeln!(writer, "    {} rax, {} [rax]", inst, mnemonic)?;
-                writeln!(writer, "    pushq rax")?;
+                writeln!(writer, "    {} (%rax), %{}", inst, reg)?;
+                writeln!(writer, "    pushq %rax")?;
             }
             Builtin::Store => {
                 let [ptr, value] = type_stack.last_chunk::<2>().unwrap();
@@ -676,16 +684,21 @@ impl Builtin {
                     panic!("ty is pointer");
                 };
                 assert_eq!(**inner, *value);
-                writeln!(writer, "    popq rax")?; // pop value
-                writeln!(writer, "    popq rbx")?; // pop pointer
-                let (register, mnemonic) = match inner.size() {
-                    1 => ("al", "byte"),
-                    2 => ("ax", "word"),
-                    4 => ("eax", "dword"),
-                    8 => ("rax", "qword"),
+                writeln!(writer, "    popq %rax")?; // pop value
+                writeln!(writer, "    popq %rbx")?; // pop pointer
+                let mnemonic = match inner.size() {
+                    1 => "movb",
+                    2 => "movw",
+                    4 => "movl",
+                    8 => "movq",
                     _ => todo!("arbitrary pointer inner size"),
                 };
-                writeln!(writer, "    mov {} [rbx], {}", mnemonic, register)?;
+                writeln!(
+                    writer,
+                    "    {} {}, (%rbx)",
+                    mnemonic,
+                    Register::Rax.for_size(inner.size()),
+                )?;
             }
         }
         Ok(())
@@ -700,40 +713,40 @@ impl Cast {
     ) -> Result<(), CodeGenError> {
         let src = type_stack.last().unwrap().clone();
         self.type_check(type_stack)?;
-        writeln!(writer, "    ; cast {} -> {}", src, self.target)?;
+        writeln!(writer, "    # cast {} -> {}", src, self.target)?;
         match self.target {
             Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Integer => {
                 if src.is_integer() {
                     // in C, `(unsigned int)((char) -1)` is `(unsigned int)((int) -1)` instead of the `255` that I'd expect...
                     // but, let's be consistent with that
                     src.pop_as(writer, Register::Rax, &self.target)?;
-                    writeln!(writer, "    pushq rax")?;
+                    writeln!(writer, "    pushq %rax")?;
                 } else if src.is_float() {
                     match src {
                         Type::F32 => {
-                            writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
-                            writeln!(writer, "    xor rax, rax")?;
+                            writeln!(writer, "    movss (%rsp), {}", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    addq ${}, %rsp", src.padded_size())?;
+                            writeln!(writer, "    xorq %rax, %rax")?;
                             writeln!(
                                 writer,
                                 "    cvtss2si {}, {}",
+                                FloatRegister::Xmm0,
                                 Register::Rax.for_size(4),
-                                FloatRegister::Xmm0
                             )?;
                         }
                         Type::F64 | Type::Float => {
-                            writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
-                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(writer, "    movsd (%rsp), {}", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    addq ${}, %rsp", src.padded_size())?;
                             writeln!(
                                 writer,
                                 "    cvtsd2si {}, {}",
+                                FloatRegister::Xmm0,
                                 Register::Rax.for_size(4),
-                                FloatRegister::Xmm0
                             )?;
                         }
                         _ => unreachable!(),
                     }
-                    writeln!(writer, "    pushq rax")?;
+                    writeln!(writer, "    pushq %rax")?;
                 }
             }
             Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
@@ -741,30 +754,30 @@ impl Cast {
                     // in C, `(unsigned int)((char) -1)` is `(unsigned int)((int) -1)` instead of the `255` that I'd expect...
                     // but, let's be consistent with that
                     src.pop_as(writer, Register::Rax, &self.target)?;
-                    writeln!(writer, "    pushq rax")?;
+                    writeln!(writer, "    pushq %rax")?;
                 } else if src.is_float() {
                     match src {
                         Type::F32 => {
-                            writeln!(writer, "    movss {}, [rsp]", FloatRegister::Xmm0)?;
-                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(writer, "    movss (%rsp), {}", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    addq ${}, %rsp", src.padded_size())?;
                             writeln!(
                                 writer,
                                 "    cvtss2si {}, {}",
+                                FloatRegister::Xmm0,
                                 Register::Rax.for_size(4),
-                                FloatRegister::Xmm0
                             )?;
-                            writeln!(writer, "    pushq rax")?;
+                            writeln!(writer, "    pushq %rax")?;
                         }
                         Type::F64 | Type::Float => {
-                            writeln!(writer, "    movsd {}, [rsp]", FloatRegister::Xmm0)?;
-                            writeln!(writer, "    add rsp, {}", src.padded_size())?;
+                            writeln!(writer, "    movsd (%rsp), {}", FloatRegister::Xmm0)?;
+                            writeln!(writer, "    addq ${}, %rsp", src.padded_size())?;
                             writeln!(
                                 writer,
                                 "    cvtsd2si {}, {}",
+                                FloatRegister::Xmm0,
                                 Register::Rax.for_size(4),
-                                FloatRegister::Xmm0
                             )?;
-                            writeln!(writer, "    pushq rax")?;
+                            writeln!(writer, "    pushq %rax")?;
                         }
                         _ => unreachable!(),
                     }
@@ -777,17 +790,17 @@ impl Cast {
                     writeln!(
                         writer,
                         "    cvtsi2ss {}, {}",
+                        Register::Rax.for_size(4),
                         FloatRegister::Xmm0,
-                        Register::Rax.for_size(4)
                     )?;
-                    writeln!(writer, "    sub rsp, 8")?;
-                    writeln!(writer, "    movss [rsp], xmm0")?;
+                    writeln!(writer, "    subq $8, %rsp")?;
+                    writeln!(writer, "    movss %xmm0, (%rsp)")?;
                 } else if src.is_float() {
                     match src {
                         Type::F32 => { /* nop */ }
                         Type::F64 => {
-                            writeln!(writer, "cvtsd2ss xmm0, [rsp]")?;
-                            writeln!(writer, "movss [rsp], xmm0")?;
+                            writeln!(writer, "cvtsd2ss (%rsp), %xmm0")?;
+                            writeln!(writer, "movss %xmm0, (%rsp)")?;
                         }
                         _ => unreachable!(),
                     }
@@ -800,16 +813,16 @@ impl Cast {
                     writeln!(
                         writer,
                         "    cvtsi2sd {}, {}",
+                        Register::Rax.for_size(4),
                         FloatRegister::Xmm0,
-                        Register::Rax.for_size(4)
                     )?;
-                    writeln!(writer, "    sub rsp, 8")?;
-                    writeln!(writer, "    movsd [rsp], xmm0")?;
+                    writeln!(writer, "    subq $8, (%rsp)")?;
+                    writeln!(writer, "    movsd %xmm0, (%rsp)")?;
                 } else if src.is_float() {
                     match src {
                         Type::F32 => {
-                            writeln!(writer, "cvtss2sd xmm0, [rsp]")?;
-                            writeln!(writer, "movsd [rsp], xmm0")?;
+                            writeln!(writer, "cvtss2sd (%rsp), %xmm0")?;
+                            writeln!(writer, "movsd %xmm0, (%rsp)")?;
                         }
                         Type::F64 => { /* nop */ }
                         _ => unreachable!(),
@@ -821,11 +834,11 @@ impl Cast {
             Type::FatPointer => todo!(),
             Type::Struct => todo!(),
             Type::Bool => {
-                writeln!(writer, "    pop rax")?;
-                writeln!(writer, "    cmp rax, 0")?;
-                writeln!(writer, "    setne al")?;
-                writeln!(writer, "    movzx rax, al")?;
-                writeln!(writer, "    pushq rax")?;
+                writeln!(writer, "    pop %rax")?;
+                writeln!(writer, "    cmp $0, %rax")?;
+                writeln!(writer, "    setne %al")?;
+                writeln!(writer, "    movzx %al, %rax")?;
+                writeln!(writer, "    pushq %rax")?;
             }
         }
         Ok(())
@@ -902,6 +915,15 @@ fn get_all_converted_functions(
     }
 }
 
+macro_rules! write_location {
+    ($self: ident, $loc: expr) => {
+        let loc = $loc;
+        let fileno = $self.module.file_no(&loc.file).unwrap();
+        writeln!($self.writer, "    # {}", loc)?;
+        writeln!($self.writer, "    .loc {} {} {}", fileno, loc.line, loc.col)?;
+    };
+}
+
 impl<W: Write> CodeGen<W> {
     pub fn new(module: Module, writer: W) -> Self {
         Self {
@@ -916,29 +938,31 @@ impl<W: Write> CodeGen<W> {
         let mut converted_functions = HashMap::new();
         get_all_converted_functions(&mut self.module, &mut converted_functions);
 
-        writeln!(self.writer, r#"format ELF64"#)?;
-        writeln!(self.writer, r#"section ".text" executable"#)?;
-
-        writeln!(
-            self.writer,
-            r#"public ?{}$main as "main""#,
-            self.module.path.join("$")
-        )?;
+        writeln!(self.writer, r#"    .file "something""#)?; // TODO: what file here?
+        writeln!(self.writer, r#"    .text"#)?;
+        for (f, n) in &self.module.files {
+            writeln!(
+                self.writer,
+                "    .file {} {:?}",
+                n,
+                f.canonicalize().unwrap()
+            )?;
+        }
         writeln!(self.writer)?;
 
         let mut functions = HashMap::new();
         get_all_functions(&self.module, &mut functions);
-        for (path, f) in functions {
-            if f.external {
-                writeln!(
-                    self.writer,
-                    "extrn {:?} as ?{}",
-                    f.linker_name,
-                    path.join("$")
-                )?;
-            }
-        }
-        writeln!(self.writer)?;
+        // for (path, f) in functions {
+        //     if f.external {
+        //         writeln!(
+        //             self.writer,
+        //             "extrn {:?} as ?{}",
+        //             f.linker_name,
+        //             path.join("$")
+        //         )?;
+        //     }
+        // }
+        // writeln!(self.writer)?;
 
         for (path, f) in converted_functions {
             self.type_stack.clear();
@@ -966,11 +990,22 @@ impl<W: Write> CodeGen<W> {
         self.type_stack.clear();
         self.type_stack.extend_from_slice(&func.args);
 
-        writeln!(self.writer, "?{}:", path.join("$"))?;
+        let symbol = if is_main {
+            writeln!(self.writer, "    .globl main")?;
+            Cow::Borrowed("main")
+        } else {
+            Cow::Owned(path.join("$"))
+        };
+        writeln!(self.writer, "    .type {}, @function", symbol)?;
+        writeln!(self.writer, "{}:", symbol)?;
+
+        let (lcurly, rcurly) = &f.curly_loc;
+
+        write_location!(self, lcurly);
 
         if is_main {
-            writeln!(self.writer, "    push rbp")?;
-            writeln!(self.writer, "    mov rbp, rsp")?;
+            writeln!(self.writer, "    pushq %rbp")?;
+            writeln!(self.writer, "    movq %rsp, %rbp")?;
         } else {
             let floati = func.args.iter().filter(|t| t.is_float()).count();
             let regi = func
@@ -988,10 +1023,10 @@ impl<W: Write> CodeGen<W> {
             let mut regi = regi.saturating_sub(1);
             for x in func.args.iter().rev() {
                 if x.is_float() {
-                    writeln!(self.writer, "    sub rsp, {}", x.padded_size())?;
+                    writeln!(self.writer, "    subq ${}, %rsp", x.padded_size())?;
                     writeln!(
                         self.writer,
-                        "    movss [rsp], {}",
+                        "    movss {}, (%rsp)",
                         FloatRegister::ARG_REGS[floati]
                     )?;
                     floati = floati.saturating_sub(1);
@@ -1021,25 +1056,28 @@ impl<W: Write> CodeGen<W> {
         }
 
         self.compile_body(f.body, &module)?;
+
+        write_location!(self, &rcurly);
+
         let (func, _module) = &self.module.resolve_path(&path[1..]).unwrap();
 
         if is_main {
-            writeln!(self.writer, "    mov rax, 0")?;
-            writeln!(self.writer, "    pop rbp")?;
+            writeln!(self.writer, "    movl $0, %eax")?;
+            writeln!(self.writer, "    popq %rbp")?;
         }
 
         let mut returns = func.returns.clone();
         if let Some(top) = returns.deref_mut().pop() {
             if top.is_float() {
                 if top == Type::F32 {
-                    writeln!(self.writer, "    movss xmm0, [rsp]")?;
-                    writeln!(self.writer, "    add rsp, 8")?;
+                    writeln!(self.writer, "    movss (%rsp), %xmm0")?;
+                    writeln!(self.writer, "    addq $8, %rsp")?;
                 } else {
-                    writeln!(self.writer, "    movsd xmm0")?;
-                    writeln!(self.writer, "    add rsp, 8")?;
+                    writeln!(self.writer, "    movsd %xmm0")?;
+                    writeln!(self.writer, "    addq $8, %rsp")?;
                 }
             } else if top.size() <= 8 {
-                writeln!(self.writer, "    popq rax")?;
+                writeln!(self.writer, "    popq %rax")?;
             } else {
                 todo!("extra values on the stack");
             }
@@ -1049,20 +1087,20 @@ impl<W: Write> CodeGen<W> {
             writeln!(self.writer)?;
             writeln!(
                 self.writer,
-                "    mov r8, [rsp+{}]",
+                "    mov +{}(%rsp), %r8",
                 returns.iter().map(|t| t.padded_size()).sum::<u32>()
             )?; // get the return address from the bottom of the stack
             writeln!(self.writer)?;
-            writeln!(self.writer, "    mov rsi, rsp")?;
-            writeln!(self.writer, "    add rsi, {}", (returns.len() - 1) * 8)?;
-            writeln!(self.writer, "    mov rdi, rsp")?;
-            writeln!(self.writer, "    add rdi, {}", returns.len() * 8)?;
+            writeln!(self.writer, "    mov %rsp, %rsi")?;
+            writeln!(self.writer, "    add ${}, rsi", (returns.len() - 1) * 8)?;
+            writeln!(self.writer, "    mov %rsp, %rdi")?;
+            writeln!(self.writer, "    add ${}, %rdi", returns.len() * 8)?;
             writeln!(self.writer)?;
             writeln!(self.writer, "    std")?; // set direction flag so `rep` decrements
-            writeln!(self.writer, "    mov rcx, {}", returns.len())?;
+            writeln!(self.writer, "    mov ${}, %rcx", returns.len())?;
             writeln!(self.writer, "    rep movsq")?;
             writeln!(self.writer)?;
-            writeln!(self.writer, "    mov [rsp], r8")?;
+            writeln!(self.writer, "    mov %r8, (%rsp)")?;
         }
 
         writeln!(self.writer, "    ret")?;
@@ -1079,36 +1117,38 @@ impl<W: Write> CodeGen<W> {
     }
 
     fn compile_ir(&mut self, ir: Ir, module: &Module) -> Result<(), CodeGenError> {
+        write_location!(self, ir.loc);
+
         match ir.kind {
             IrKind::PushInt(n, ty) => {
                 self.type_stack.push(ty.into());
-                writeln!(self.writer, "    mov rax, {}", n)?;
-                writeln!(self.writer, "    pushq rax")?;
+                writeln!(self.writer, "    mov ${}, %rax", n)?;
+                writeln!(self.writer, "    pushq %rax")?;
             }
             IrKind::PushFloat(f, ty) => {
                 self.type_stack.push(ty.into());
                 writeln!(
                     self.writer,
-                    "    sub rsp, {}",
+                    "    subq ${}, %rsp",
                     Type::from(&ty).padded_size()
                 )?;
                 match ty {
                     FloatLitType::F32 => {
                         let label = self.data.add_f32(f as f32);
-                        writeln!(self.writer, "    movss xmm0, [{}]", label)?;
-                        writeln!(self.writer, "    movss [rsp], xmm0")?;
+                        writeln!(self.writer, "    movss ({}), %xmm0", &label[1..])?;
+                        writeln!(self.writer, "    movss %xmm0, (%rsp)")?;
                     }
                     FloatLitType::F64 | FloatLitType::Unresolved => {
                         let label = self.data.add_f64(f);
-                        writeln!(self.writer, "    movsd xmm0, [{}]", label)?;
-                        writeln!(self.writer, "    movsd [rsp], xmm0")?;
+                        writeln!(self.writer, "    movsd ({}), %xmm0", &label[1..])?;
+                        writeln!(self.writer, "    movsd %xmm0, (%rsp)")?;
                     }
                 }
             }
             IrKind::PushBool(b) => {
                 self.type_stack.push(ty!(bool));
-                writeln!(self.writer, "    mov rax, {}", if b { 1 } else { 0 })?;
-                writeln!(self.writer, "    pushq rax")?;
+                writeln!(self.writer, "    movq ${}, %rax", if b { 1 } else { 0 })?;
+                writeln!(self.writer, "    pushq %rax")?;
             }
             IrKind::PushCStr(s) => {
                 self.type_stack.push(ty!(*i8));
@@ -1147,8 +1187,8 @@ impl<W: Write> CodeGen<W> {
         let id = then.then_span.start();
         self.type_stack.pop_type(then.then_span, &ty!(bool))?;
 
-        writeln!(self.writer, "    popq rax")?;
-        writeln!(self.writer, "    cmp rax, 0")?;
+        writeln!(self.writer, "    popq %rax")?;
+        writeln!(self.writer, "    cmp $0, %rax")?;
         if then.elze.is_empty() {
             writeln!(self.writer, "    je .then_end_{}", id)?;
         } else {
@@ -1166,8 +1206,8 @@ impl<W: Write> CodeGen<W> {
             writeln!(self.writer, ".else_{}_{}:", id, i)?;
             self.compile_body(et.condition, module)?;
             self.type_stack.pop_type(then.then_span, &Type::Bool)?;
-            writeln!(self.writer, "    popq rax")?;
-            writeln!(self.writer, "    cmp rax, 0")?;
+            writeln!(self.writer, "    popq %rax")?;
+            writeln!(self.writer, "    cmp $0, %rax")?;
 
             if i == et_len - 1 && then.elze.is_empty() {
                 writeln!(self.writer, "    je .then_end_{}", id)?;
@@ -1198,9 +1238,9 @@ impl<W: Write> CodeGen<W> {
         // ```asm
         //     jmp .while_end_0
         // .while_0:
-        //     ; body
+        //     # body
         //  .while_end_0:
-        //     ; condition
+        //     # condition
         //     popq rax
         //     cmp rax, 0
         //     jne .while_0
@@ -1213,8 +1253,8 @@ impl<W: Write> CodeGen<W> {
         writeln!(self.writer, ".{}_end:", id)?;
         self.compile_body(whil.condition, module)?;
         self.type_stack.pop_type(whil.condition_span, &Type::Bool)?;
-        writeln!(self.writer, "    popq rax")?;
-        writeln!(self.writer, "    cmp rax, 0")?;
+        writeln!(self.writer, "    popq %rax")?;
+        writeln!(self.writer, "    cmp $0, %rax")?;
         writeln!(self.writer, "    jne .{}", id)?;
         writeln!(self.writer, ".{}_break:", id)?;
         assert!(start.matches(&self.type_stack));
@@ -1266,8 +1306,8 @@ impl<W: Write> CodeGen<W> {
                         (Type::F64 | Type::Float, Some(Type::F64)) => "movsd",
                         _ => unreachable!(),
                     };
-                    writeln!(self.writer, "    {} {}, [rsp]", instruction, dest)?;
-                    writeln!(self.writer, "    add rsp, 8")?;
+                    writeln!(self.writer, "    {} (%rsp), {}", instruction, dest)?;
+                    writeln!(self.writer, "    addq $8, %rsp")?;
                     float_i += 1;
                 }
                 ArgumentDest::FloatRegister => todo!("overflow on stack"),
@@ -1276,25 +1316,29 @@ impl<W: Write> CodeGen<W> {
 
         self.type_stack.extend_from_slice(&f.returns);
         // TODO: What should go in rax?
-        writeln!(self.writer, "    mov rax, {}", float_i)?;
+        writeln!(self.writer, "    movq ${}, %rax", float_i)?;
 
         let (resolved_f, module) = module.resolve_ident(&ident.path)?;
         let resolved_f = resolved_f.unwrap_function();
-        writeln!(
-            self.writer,
-            "    call ?{}${}",
-            module.path.join("$"),
-            resolved_f.name
-        )?;
+        if resolved_f.external {
+            writeln!(self.writer, "    call {}", resolved_f.linker_name,)?;
+        } else {
+            writeln!(
+                self.writer,
+                "    call {}${}",
+                module.path.join("$"),
+                resolved_f.name
+            )?;
+        }
 
         // Push first argument back onto the stack
         if let Some(ret) = f.returns.first() {
             match ret.argument_dest() {
-                ArgumentDest::Register => writeln!(self.writer, "    push rax")?,
+                ArgumentDest::Register => writeln!(self.writer, "    push %rax")?,
                 ArgumentDest::Stack => todo!(),
                 ArgumentDest::FloatRegister => {
                     assert_eq!(*ret, ty!(f32));
-                    writeln!(self.writer, "    sub rsp, 8")?;
+                    writeln!(self.writer, "    subq $8, %rsp")?;
                     writeln!(self.writer, "    movss [rsp], xmm0")?;
                 }
             }

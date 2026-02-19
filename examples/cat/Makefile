@@ -1,8 +1,5 @@
-cat: cat.o
-	gcc -ggdb -no-pie -o cat cat.o
-
-cat.o: cat.s
-	fasm cat.s cat.o
+cat: cat.s
+	gcc -ggdb -no-pie -o cat cat.s
 
 cat.s: cat.st
 	cargo r -- cat.st -o cat.s
